@@ -1,8 +1,10 @@
+use async_trait::async_trait;
 use move_core_types::{
     account_address::AccountAddress, language_storage::TypeTag, parser::parse_type_tag,
 };
-use moveos_client::Client;
 use moveos_types::move_types::StructId;
+use rooch_client::Client;
+use rooch_types::cli::{CliError, CliResult, CommandAction};
 
 #[derive(clap::Parser)]
 pub struct ResourceCommand {
@@ -31,8 +33,9 @@ pub struct ResourceCommand {
     client: Client,
 }
 
-impl ResourceCommand {
-    pub async fn execute(self) -> anyhow::Result<()> {
+#[async_trait]
+impl CommandAction<Option<String>> for ResourceCommand {
+    async fn execute(self) -> CliResult<Option<String>> {
         let resp = self
             .client
             .resource(
@@ -41,8 +44,8 @@ impl ResourceCommand {
                 self.resource.struct_id.clone(),
                 self.type_args,
             )
-            .await?;
-        println!("{:?}", resp);
-        Ok(())
+            .await
+            .map_err(CliError::from)?;
+        Ok(resp)
     }
 }

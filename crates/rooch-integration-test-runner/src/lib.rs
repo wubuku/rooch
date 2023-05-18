@@ -12,9 +12,8 @@ use move_transactional_test_runner::{
 };
 use move_vm_runtime::session::SerializedReturnValues;
 use moveos::moveos::MoveOS;
-use moveos::vm::dependency_order::sort_by_dependency_order;
 use moveos_types::object::{ObjectID, RawObject};
-use moveos_types::transaction::{MoveTransaction, SimpleTransaction};
+use moveos_types::transaction::{MoveAction, MoveOSTransaction};
 use std::{collections::BTreeMap, path::Path};
 
 pub struct MoveOSTestAdapter<'a> {
@@ -132,9 +131,9 @@ impl<'a> MoveTestAdapter<'a> for MoveOSTestAdapter<'a> {
         let id = module.self_id();
         let sender = *id.address();
 
-        let txn = SimpleTransaction::new(
+        let txn = MoveOSTransaction::new_for_test(
             sender,
-            MoveTransaction::new_module_bundle(vec![module_bytes]),
+            MoveAction::new_module_bundle(vec![module_bytes]),
         );
         self.moveos.execute(txn)?;
         Ok((None, module))
@@ -165,9 +164,9 @@ impl<'a> MoveTestAdapter<'a> for MoveOSTestAdapter<'a> {
             .map(|arg| arg.simple_serialize().unwrap())
             .collect::<Vec<_>>();
 
-        let txn = SimpleTransaction::new(
+        let txn = MoveOSTransaction::new_for_test(
             signers.pop().unwrap(),
-            MoveTransaction::new_script(script_bytes, type_args, args),
+            MoveAction::new_script(script_bytes, type_args, args),
         );
         self.moveos.execute(txn)?;
         //TODO return values
@@ -200,9 +199,9 @@ impl<'a> MoveTestAdapter<'a> for MoveOSTestAdapter<'a> {
             .iter()
             .map(|arg| arg.simple_serialize().unwrap())
             .collect::<Vec<_>>();
-        let txn = SimpleTransaction::new(
+        let txn = MoveOSTransaction::new_for_test(
             signers.pop().unwrap(),
-            MoveTransaction::new_function(module.clone(), function.to_owned(), type_args, args),
+            MoveAction::new_function(module.clone(), function.to_owned(), type_args, args),
         );
         self.moveos.execute(txn)?;
         //TODO return values

@@ -1,6 +1,7 @@
-use moveos_client::Client;
+use async_trait::async_trait;
 use moveos_types::object::ObjectID;
-
+use rooch_client::Client;
+use rooch_types::cli::{CliResult, CommandAction};
 #[derive(clap::Parser)]
 pub struct ObjectCommand {
     /// Object id.
@@ -12,10 +13,10 @@ pub struct ObjectCommand {
     client: Client,
 }
 
-impl ObjectCommand {
-    pub async fn execute(self) -> anyhow::Result<()> {
+#[async_trait]
+impl CommandAction<Option<String>> for ObjectCommand {
+    async fn execute(self) -> CliResult<Option<String>> {
         let resp = self.client.object(self.id).await?;
-        println!("{:?}", resp);
-        Ok(())
+        Ok(resp)
     }
 }

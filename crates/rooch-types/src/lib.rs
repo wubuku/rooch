@@ -3,7 +3,8 @@
 
 pub mod account;
 pub mod address;
-pub mod coin;
+pub mod cli;
+pub mod coin_id;
 pub mod error;
 pub mod rooch_serde;
 pub mod transaction;

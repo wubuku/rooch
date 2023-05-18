@@ -80,7 +80,7 @@ impl TxArgumentResolver for NativeTableContext<'_> {
 }
 
 fn is_signer(t: &Type) -> bool {
-    matches!(t, Type::Signer)
+    matches!(t, Type::Signer) || matches!(t, Type::Reference(r) if matches!(**r, Type::Signer))
 }
 
 fn as_struct<T>(session: &SessionExt<T>, t: &Type) -> Option<Arc<StructType>>
@@ -100,6 +100,18 @@ where
     }
 }
 
+pub fn as_struct_no_panic<T>(session: &SessionExt<T>, t: &Type) -> Option<Arc<StructType>>
+where
+    T: MoveResolverExt,
+{
+    match t {
+        Type::Struct(s) | Type::StructInstantiation(s, _) => session.get_struct_type(*s),
+        Type::Reference(r) => as_struct_no_panic(session, r),
+        Type::MutableReference(r) => as_struct_no_panic(session, r),
+        _ => None,
+    }
+}
+
 // fn is_object(t: &StructType) -> bool {
 //     *t.module.address() == *moveos_stdlib::addresses::MOVEOS_STD_ADDRESS
 //         && t.module.name() == object::OBJECT_MODULE_NAME
@@ -112,7 +124,7 @@ fn is_tx_context(t: &StructType) -> bool {
         && t.name == TxContext::struct_identifier()
 }
 
-fn is_storage_context(t: &StructType) -> bool {
+pub fn is_storage_context(t: &StructType) -> bool {
     *t.module.address() == *moveos_stdlib::addresses::MOVEOS_STD_ADDRESS
         && t.module.name() == StorageContext::module_identifier().as_ident_str()
         && t.name == StorageContext::struct_identifier()
