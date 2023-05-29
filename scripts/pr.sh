@@ -7,6 +7,18 @@
 BASE=$(git rev-parse --show-toplevel)
 
 set -e
+CARGO_HOME=${CARGO_HOME:-~/.cargo}
+
+echo $CARGO_HOME/cargo-nextest
+
+if [ ! -f ${CARGO_HOME}/bin/cargo-nextest ];then
+  echo "install nextest"
+  if [[ "$(uname)" == "Linux" ]]; then
+    curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
+  elif [[ "$(uname)" == "Darwin" ]]; then
+    curl -LsSf https://get.nexte.st/latest/mac | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
+  fi
+fi
 
 # Run only tests which would also be run on CI
 export ENV_TEST_ON_CI=1
@@ -59,6 +71,7 @@ EOF
       GEN_ARTIFACTS=1
       GIT_CHECKS=1
       ALSO_TEST=1
+      MOVE_TESTS=1
       MOVE_E2E_TESTS=1
       ;;
   esac
@@ -74,7 +87,10 @@ if [ ! -z "$CHECK" ]; then
   cargo clippy --all-targets --all-features --tests --benches -- -D warnings
 fi
 
+cargo build
+
 if [ ! -z "$ALSO_TEST" ]; then
+    cargo nextest run --workspace --all-features
     cargo test -p testsuite --test integration
 fi
 

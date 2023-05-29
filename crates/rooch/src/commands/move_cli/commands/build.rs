@@ -3,8 +3,13 @@
 
 use crate::move_cli::types::AccountAddressWrapper;
 use clap::*;
+
 use move_cli::base::reroot_path;
+
 use move_package::BuildConfig;
+
+use moveos_verifier::build::run_verifier;
+
 use std::{collections::BTreeMap, path::PathBuf};
 
 /// Build the package at `path`. If no path is provided defaults to current directory.
@@ -29,6 +34,8 @@ impl Build {
             .map(|(key, value)| (key, value.account_address))
             .collect();
 
+        let additional_named_address = config.additional_named_addresses.clone();
+
         let rerooted_path = reroot_path(path)?;
         if config.fetch_deps_only {
             if config.test_mode {
@@ -38,7 +45,9 @@ impl Build {
             return Ok(());
         }
 
-        config.compile_package_no_exit(&rerooted_path, &mut std::io::stdout())?;
+        let mut package = config.compile_package_no_exit(&rerooted_path, &mut std::io::stdout())?;
+
+        run_verifier(rerooted_path, additional_named_address, &mut package);
 
         Ok(())
     }
