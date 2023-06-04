@@ -1,9 +1,12 @@
 module rooch_examples::something {
+    use std::string::String;
+
     use moveos_std::object::{Self, Object};
-    use moveos_std::object_id::{ObjectID};
+    use moveos_std::object_id::ObjectID;
     use moveos_std::object_storage;
     use moveos_std::storage_context::{Self, StorageContext};
-    use moveos_std::tx_context;
+    use moveos_std::table::{Self, Table};
+    use moveos_std::tx_context::{Self, TxContext};
 
     friend rooch_examples::something_aggregate;
     friend rooch_examples::something_do_logic;
@@ -11,6 +14,7 @@ module rooch_examples::something {
     struct SomethingProperties has key {
         i: u32,
         j: u128,
+        fooTable: Table<String, String>
     }
 
     /// get object id
@@ -43,22 +47,38 @@ module rooch_examples::something {
     ): Object<SomethingProperties> {
         let tx_ctx = storage_context::tx_context_mut(storage_ctx);
         let owner = tx_context::sender(tx_ctx);
+        let value = new_something_properties(tx_ctx, i, j);
         let obj = object::new(
             tx_ctx,
             owner,
-            new_something_properties(i, j),
+            value,
         );
         obj
     }
 
     fun new_something_properties(
+        ctx: &mut TxContext,
         i: u32,
         j: u128,
     ): SomethingProperties {
         SomethingProperties {
             i,
             j,
+            fooTable: table::new(ctx),
         }
+    }
+
+    public(friend) fun add_foo_table_item(
+        storage_ctx: &mut StorageContext,
+        obj: &mut Object<SomethingProperties>,
+        key: String,
+        val: String
+    ) {
+        table::add(&mut object::borrow_mut(obj).fooTable, key, val);
+        // events::emit_event(storage_ctx, FooTableItemAdded {
+        //     key
+        // });
+        let _ = storage_ctx;
     }
 
     public(friend) fun add_something(storage_ctx: &mut StorageContext, obj: Object<SomethingProperties>) {
