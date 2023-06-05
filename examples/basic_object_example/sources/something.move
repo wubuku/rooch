@@ -14,7 +14,8 @@ module rooch_examples::something {
     struct SomethingProperties has key {
         i: u32,
         j: u128,
-        fooTable: Table<String, String>
+        fooTable: Table<String, String>,
+        barTable: Table<u8, u128>,
     }
 
     /// get object id
@@ -61,11 +62,16 @@ module rooch_examples::something {
         i: u32,
         j: u128,
     ): SomethingProperties {
-        SomethingProperties {
+        let ps = SomethingProperties {
             i,
             j,
             fooTable: table::new(ctx),
-        }
+            barTable: table::new(ctx),
+        };
+        table::add(&mut ps.barTable, 0, 0);
+        table::add(&mut ps.barTable, 1, 1);
+        table::add(&mut ps.barTable, 2, 2);
+        ps
     }
 
     public(friend) fun add_foo_table_item(
