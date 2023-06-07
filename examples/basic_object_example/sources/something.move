@@ -1,6 +1,7 @@
 module rooch_examples::something {
     use std::string::String;
 
+    use moveos_std::events;
     use moveos_std::object::{Self, Object};
     use moveos_std::object_id::ObjectID;
     use moveos_std::object_storage;
@@ -41,6 +42,12 @@ module rooch_examples::something {
         object::borrow_mut(obj).j = j;
     }
 
+    struct SomethingCreated has key {
+        obj_id: ObjectID,
+        i: u32,
+        j: u128,
+    }
+
     public(friend) fun create_something(
         storage_ctx: &mut StorageContext,
         i: u32,
@@ -54,6 +61,11 @@ module rooch_examples::something {
             owner,
             value,
         );
+        events::emit_event(storage_ctx, SomethingCreated {
+            obj_id: object::id(&obj),
+            i,
+            j,
+        });
         obj
     }
 
