@@ -7,7 +7,7 @@ module rooch_examples::something {
     use moveos_std::object_storage;
     use moveos_std::storage_context::{Self, StorageContext};
     use moveos_std::table::{Self, Table};
-    use moveos_std::tx_context::{Self, TxContext};
+    use moveos_std::tx_context;
 
     friend rooch_examples::something_aggregate;
     friend rooch_examples::something_do_logic;
@@ -48,14 +48,23 @@ module rooch_examples::something {
         j: u128,
     }
 
+    struct KeyValuePair<K, V> has store {
+        key: K,
+        value: V,
+    }
+
+    struct BarTableItemAdded has key {
+        item: KeyValuePair<u8, u128>
+    }
+
     public(friend) fun create_something(
         storage_ctx: &mut StorageContext,
         i: u32,
         j: u128,
     ): Object<SomethingProperties> {
+        let value = new_something_properties(storage_ctx, i, j);
         let tx_ctx = storage_context::tx_context_mut(storage_ctx);
         let owner = tx_context::sender(tx_ctx);
-        let value = new_something_properties(tx_ctx, i, j);
         let obj = object::new(
             tx_ctx,
             owner,
@@ -70,20 +79,35 @@ module rooch_examples::something {
     }
 
     fun new_something_properties(
-        ctx: &mut TxContext,
+        storage_ctx: &mut StorageContext,
         i: u32,
         j: u128,
     ): SomethingProperties {
+        let tx_ctx = storage_context::tx_context_mut(storage_ctx);
         let ps = SomethingProperties {
             i,
             j,
-            fooTable: table::new(ctx),
-            barTable: table::new(ctx),
+            fooTable: table::new(tx_ctx),
+            barTable: table::new(tx_ctx),
         };
-        table::add(&mut ps.barTable, 0, 0);
-        table::add(&mut ps.barTable, 1, 1);
-        table::add(&mut ps.barTable, 2, 2);
+        add_bar_table_item(storage_ctx, &mut ps.barTable, 0, 0);
+        add_bar_table_item(storage_ctx, &mut ps.barTable, 1, 1);
+        add_bar_table_item(storage_ctx, &mut ps.barTable, 2, 2);
         ps
+    }
+
+    fun add_bar_table_item(storage_ctx: &mut StorageContext,
+                           table: &mut Table<u8, u128>,
+                           key: u8,
+                           val: u128
+    ) {
+        table::add(table, key, val);
+        events::emit_event(storage_ctx, BarTableItemAdded {
+            item: KeyValuePair {
+                key,
+                value: val,
+            }
+        });
     }
 
     public(friend) fun add_foo_table_item(
