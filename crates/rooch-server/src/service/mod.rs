@@ -15,7 +15,7 @@ use moveos_types::{
 use rooch_executor::proxy::ExecutorProxy;
 use rooch_proposer::proxy::ProposerProxy;
 use rooch_sequencer::proxy::SequencerProxy;
-use rooch_types::{address::RoochAddress, transaction::TypedTransaction};
+use rooch_types::{address::RoochAddress, transaction::TypedTransaction, H256};
 
 use crate::jsonrpc_types::ExecuteTransactionResponse;
 
@@ -55,14 +55,15 @@ impl RpcService {
         let moveos_tx = self.executor.validate_transaction(tx.clone()).await?;
         let sequence_info = self.sequencer.sequence_transaction(tx.clone()).await?;
         // Then execute
-        let (_output, execution_info) = self.executor.execute_transaction(moveos_tx).await?;
+        let (output, execution_info) = self.executor.execute_transaction(moveos_tx).await?;
         self.proposer
             .propose_transaction(tx, execution_info.clone(), sequence_info.clone())
             .await?;
-        //TODO conform the response, put the TransactionOutput and proposer result to response.
+
         Ok(ExecuteTransactionResponse {
             sequence_info,
             execution_info,
+            output,
         })
     }
 
@@ -124,6 +125,23 @@ impl RpcService {
 
     pub async fn get_events(&self, filter: EventFilter) -> Result<Option<Vec<MoveOSEvent>>> {
         let resp = self.executor.get_events(filter).await?;
+        Ok(resp)
+    }
+
+    pub async fn get_transaction_by_hash(&self, hash: H256) -> Result<Option<TypedTransaction>> {
+        let resp = self.sequencer.get_transaction_by_hash(hash).await?;
+        Ok(resp)
+    }
+
+    pub async fn get_transaction_by_index(
+        &self,
+        start: u64,
+        limit: u64,
+    ) -> Result<Vec<TypedTransaction>> {
+        let resp = self
+            .sequencer
+            .get_transaction_by_index(start, limit)
+            .await?;
         Ok(resp)
     }
 }

@@ -21,6 +21,8 @@ Feature: Rooch CLI integration tests
       Then assert: "{{$.move[-1][0].move_value}} == 1"
       Then cmd: "resource --address {default} --resource {default}::counter::Counter"
 
+      Then cmd: "transaction get-by-hash --hash {{$.account[0].execution_info.tx_hash}}"
+      Then cmd: "transaction get-by-index --start 0 --limit 10"
 
       # kv store example
       Then cmd: "move publish -p ../../examples/kv_store --sender-account {default} --named-addresses rooch_examples={default}"
@@ -31,5 +33,3 @@ Feature: Rooch CLI integration tests
       #Then cmd: "state --access-path /resource/{default}/{default}::kv_store::KVStore
       #Then cmd: "state --access-path /table/{{$.move[-1][0].move_value.value.table.value.handle}}/key1"
       #Then assert: "{{$.move[-1][0].move_value}} == "value1""
-            
-      
