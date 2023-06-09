@@ -320,11 +320,19 @@ impl StateDB {
         Ok(())
     }
 
+<<<<<<< HEAD
     fn get_resource_state(
         &self,
         address: &AccountAddress,
         tag: &StructTag,
     ) -> Result<Option<State>> {
+=======
+    pub fn get_resource(
+        &self,
+        address: &AccountAddress,
+        tag: &StructTag,
+    ) -> Result<Option<Vec<u8>>, Error> {
+>>>>>>> ecc4197 (fixed some repeat issue)
         let resource_table_id = NamedTableID::Resource(*address).to_object_id();
         let key = tag_to_key(tag);
         self.get_with_key(resource_table_id, key)?
@@ -340,6 +348,7 @@ impl StateDB {
             .transpose()
     }
 
+<<<<<<< HEAD
     pub fn get_resource(
         &self,
         address: &AccountAddress,
@@ -358,6 +367,14 @@ impl StateDB {
         //We wrap the modules byte codes to `MoveModule` type when store the module.
         //So we need unwrap the MoveModule type.
         self.get_module_state(module_id)?
+=======
+    pub fn get_module(&self, module_id: &ModuleId) -> Result<Option<Vec<u8>>, Error> {
+        let module_table_id = NamedTableID::Module(*module_id.address()).to_object_id();
+        let key = module_name_to_key(module_id.name());
+        //We wrap the modules byte codes to `MoveModule` type when store the module.
+        //So we need unwrap the MoveModule type.
+        self.get_with_key(module_table_id, key)?
+>>>>>>> ecc4197 (fixed some repeat issue)
             .map(|s| Ok(s.as_move_state::<MoveModule>()?.byte_codes))
             .transpose()
     }
@@ -366,14 +383,22 @@ impl StateDB {
         &self,
         handle: &TableHandle,
         key: &[u8],
+<<<<<<< HEAD
     ) -> Result<Option<TableValue>, Error> {
+=======
+    ) -> Result<Option<TableValueBox>, Error> {
+>>>>>>> ecc4197 (fixed some repeat issue)
         let state = if handle.0 == storage_context::GLOBAL_OBJECT_STORAGE_HANDLE {
             self.global_table.get(key.to_vec())
         } else {
             self.get_with_key((*handle).into(), key.to_vec())
         }?;
         match state {
+<<<<<<< HEAD
             Some(state) => Ok(Some(TableValue {
+=======
+            Some(state) => Ok(Some(TableValueBox {
+>>>>>>> ecc4197 (fixed some repeat issue)
                 value_type: state.value_type,
                 value: state.value,
             })),
@@ -437,7 +462,11 @@ impl TableResolver for MoveOSDB {
         &self,
         handle: &TableHandle,
         key: &[u8],
+<<<<<<< HEAD
     ) -> std::result::Result<Option<TableValue>, Error> {
+=======
+    ) -> std::result::Result<Option<TableValueBox>, Error> {
+>>>>>>> ecc4197 (fixed some repeat issue)
         self.state_store.resolve_table_entry(handle, key)
     }
 }
@@ -447,6 +476,7 @@ impl TableResolver for StateDB {
         &self,
         handle: &TableHandle,
         key: &[u8],
+<<<<<<< HEAD
     ) -> std::result::Result<Option<TableValue>, Error> {
         self.resolve_table_entry(handle, key)
     }
@@ -455,5 +485,9 @@ impl TableResolver for StateDB {
 impl StateReader for StateDB {
     fn get_states(&self, path: &AccessPath) -> Result<Vec<Option<State>>> {
         self.get_with_access_path(path)
+=======
+    ) -> std::result::Result<Option<TableValueBox>, Error> {
+        self.resolve_table_entry(handle, key)
+>>>>>>> ecc4197 (fixed some repeat issue)
     }
 }
