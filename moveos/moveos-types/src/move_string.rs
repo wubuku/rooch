@@ -3,18 +3,20 @@
 
 use std::str::FromStr;
 
-use crate::state::MoveStructState;
+use crate::{addresses::MOVE_STD_ADDRESS, state::MoveStructState};
 use anyhow::ensure;
 use move_core_types::{
+    account_address::AccountAddress,
     ident_str,
     identifier::IdentStr,
     move_resource::MoveStructType,
     value::{MoveStructLayout, MoveTypeLayout},
 };
 use move_resource_viewer::{AnnotatedMoveStruct, AnnotatedMoveValue};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Eq, PartialEq, Clone, PartialOrd, Ord, Hash)]
+#[derive(Debug, Eq, PartialEq, Clone, PartialOrd, Ord, Hash, JsonSchema)]
 pub struct MoveString {
     bytes: Vec<u8>,
 }
@@ -40,6 +42,7 @@ impl FromStr for MoveString {
 }
 
 impl MoveStructType for MoveString {
+    const ADDRESS: AccountAddress = MOVE_STD_ADDRESS;
     const MODULE_NAME: &'static IdentStr = ident_str!("string");
     const STRUCT_NAME: &'static IdentStr = ident_str!("String");
 }
@@ -91,7 +94,7 @@ impl TryFrom<AnnotatedMoveStruct> for MoveString {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone, PartialOrd, Ord, Hash)]
+#[derive(Debug, Eq, PartialEq, Clone, PartialOrd, Ord, Hash, JsonSchema)]
 pub struct MoveAsciiString {
     bytes: Vec<u8>,
 }
@@ -119,6 +122,7 @@ impl FromStr for MoveAsciiString {
 }
 
 impl MoveStructType for MoveAsciiString {
+    const ADDRESS: AccountAddress = MOVE_STD_ADDRESS;
     const MODULE_NAME: &'static IdentStr = ident_str!("ascii");
     const STRUCT_NAME: &'static IdentStr = ident_str!("String");
 }

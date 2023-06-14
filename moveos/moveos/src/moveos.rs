@@ -1,60 +1,93 @@
 // Copyright (c) RoochNetwork
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::vm::move_vm_ext::MoveVmExt;
-use anyhow::{bail, Result};
+use crate::vm::moveos_vm::MoveOSVM;
+use anyhow::{bail, ensure, Result};
 use move_binary_format::errors::vm_status_of_result;
 use move_binary_format::errors::{Location, PartialVMError};
-use move_core_types::vm_status::VMStatus;
+use move_core_types::vm_status::{KeptVMStatus, VMStatus};
 use move_core_types::{
     account_address::AccountAddress, identifier::Identifier, language_storage::ModuleId,
     value::MoveValue, vm_status::StatusCode,
 };
+use move_vm_runtime::config::VMConfig;
+use move_vm_runtime::native_functions::NativeFunction;
 use move_vm_types::gas::UnmeteredGasMeter;
 use moveos_store::MoveOSDB;
 use moveos_store::{event_store::EventStore, state_store::StateDB};
+use moveos_types::addresses::MOVEOS_STD_ADDRESS;
 use moveos_types::function_return_value::FunctionReturnValue;
+use moveos_types::move_types::FunctionId;
 use moveos_types::state_resolver::MoveOSResolverProxy;
 use moveos_types::storage_context::StorageContext;
 use moveos_types::transaction::{
-    AuthenticatableTransaction, MoveAction, MoveOSTransaction, TransactionOutput,
-    VerifiedMoveOSTransaction,
+    AuthenticatableTransaction, MoveOSTransaction, TransactionOutput, VerifiedMoveOSTransaction,
 };
 use moveos_types::tx_context::TxContext;
-use moveos_types::{addresses::ROOCH_FRAMEWORK_ADDRESS, move_types::FunctionId};
 use moveos_types::{h256::H256, transaction::FunctionCall};
 use once_cell::sync::Lazy;
 
+//TODO migrate this to rooch crates.
 pub static VALIDATE_FUNCTION: Lazy<FunctionId> = Lazy::new(|| {
     FunctionId::new(
         ModuleId::new(
-            *ROOCH_FRAMEWORK_ADDRESS,
+            AccountAddress::from_hex_literal("0x3").unwrap(),
             Identifier::new("account").unwrap(),
         ),
         Identifier::new("validate").unwrap(),
     )
 });
 
+pub struct MoveOSConfig {
+    pub vm_config: VMConfig,
+}
+
+//TODO make VMConfig cloneable
+impl Clone for MoveOSConfig {
+    fn clone(&self) -> Self {
+        Self {
+            vm_config: VMConfig {
+                verifier: self.vm_config.verifier.clone(),
+                max_binary_format_version: self.vm_config.max_binary_format_version,
+                paranoid_type_checks: self.vm_config.paranoid_type_checks,
+            },
+        }
+    }
+}
+
 pub struct MoveOS {
-    vm: MoveVmExt,
+    vm: MoveOSVM,
     db: MoveOSResolverProxy<MoveOSDB>,
 }
 
 impl MoveOS {
-    pub fn new(db: MoveOSDB) -> Result<Self> {
-        let vm = MoveVmExt::new()?;
-        let is_genesis = db.get_state_store().is_genesis();
-        let mut moveos = Self {
+    pub fn new(
+        db: MoveOSDB,
+        natives: impl IntoIterator<Item = (AccountAddress, Identifier, Identifier, NativeFunction)>,
+        config: MoveOSConfig,
+    ) -> Result<Self> {
+        let vm = MoveOSVM::new(natives, config.vm_config)?;
+        Ok(Self {
             vm,
             db: MoveOSResolverProxy(db),
-        };
-        if is_genesis {
-            //TODO the genesis
-            let genesis_tx = Self::build_genesis_tx()?;
-            let verified_tx = moveos.verify(genesis_tx)?;
-            moveos.execute(verified_tx)?;
+        })
+    }
+
+    pub fn init_genesis(&mut self, genesis_txs: Vec<MoveOSTransaction>) -> Result<()> {
+        ensure!(
+            self.db.0.get_state_store().is_genesis(),
+            "genesis already initialized"
+        );
+
+        for genesis_tx in genesis_txs {
+            let verified_tx = self.verify(genesis_tx)?;
+            let (_state_root, output) = self.execute(verified_tx)?;
+            if output.status != KeptVMStatus::Executed {
+                bail!("genesis tx should success, error: {:?}", output.status);
+            }
         }
-        Ok(moveos)
+        //TODO return the state root genesis TransactionExecutionInfo
+        Ok(())
     }
 
     pub fn state(&self) -> &StateDB {
@@ -69,22 +102,12 @@ impl MoveOS {
         self.db.0.get_event_store()
     }
 
-    //TODO move to a suitable place
-    pub fn build_genesis_tx() -> Result<MoveOSTransaction> {
-        let genesis_tx =
-            MoveAction::ModuleBundle(moveos_stdlib::Framework::build()?.into_module_bundles()?);
-        Ok(MoveOSTransaction::new_for_test(
-            *ROOCH_FRAMEWORK_ADDRESS,
-            genesis_tx,
-        ))
-    }
-
     pub fn validate<T: AuthenticatableTransaction>(
         &mut self,
         tx: T,
     ) -> Result<VerifiedMoveOSTransaction> {
         //TODO ensure the validate function's sender should be the genesis address?
-        let tx_context = TxContext::new(*ROOCH_FRAMEWORK_ADDRESS, tx.tx_hash());
+        let tx_context = TxContext::new(MOVEOS_STD_ADDRESS, tx.tx_hash());
 
         let authenticator = tx.authenticator_info();
 
@@ -139,12 +162,23 @@ impl MoveOS {
 
     pub fn execute(&mut self, tx: VerifiedMoveOSTransaction) -> Result<(H256, TransactionOutput)> {
         let VerifiedMoveOSTransaction { ctx, action } = tx;
+        let tx_hash = ctx.tx_hash();
+        if log::log_enabled!(log::Level::Debug) {
+            log::debug!(
+                "execute tx(sender:{}, hash:{}, action:{})",
+                ctx.sender(),
+                tx_hash,
+                action
+            );
+        }
         //TODO define the gas meter.
         let gas_meter = UnmeteredGasMeter;
         let ctx = StorageContext::new(ctx);
         let mut session = self.vm.new_session(&self.db, ctx, gas_meter);
-
         let execute_result = session.execute_move_action(action);
+        if execute_result.is_err() {
+            log::warn!("execute tx({}) error: {:?}", tx_hash, execute_result);
+        }
         let vm_status = vm_status_of_result(execute_result);
         let (_ctx, output) = session.finish_with_extensions(vm_status)?;
         let state_root = self.apply_transaction_output(output.clone())?;
@@ -156,7 +190,7 @@ impl MoveOS {
         let TransactionOutput {
             status: _,
             changeset,
-            state_changeset: table_changeset,
+            state_changeset,
             events,
             gas_used: _,
         } = output;
@@ -165,7 +199,7 @@ impl MoveOS {
             .db
             .0
             .get_state_store()
-            .apply_change_set(changeset, table_changeset)
+            .apply_change_set(changeset, state_changeset)
             .map_err(|e| {
                 PartialVMError::new(StatusCode::STORAGE_ERROR)
                     .with_message(e.to_string())

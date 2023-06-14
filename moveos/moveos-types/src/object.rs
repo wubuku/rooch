@@ -1,11 +1,13 @@
 // Copyright (c) RoochNetwork
 // SPDX-License-Identifier: Apache-2.0
 use crate::{
+    addresses::MOVEOS_STD_ADDRESS,
     h256,
     state::{MoveStructState, State},
 };
 /// The Move Object is from Sui Move, and we try to mix the Global storage model and Object model in MoveOS.
 use anyhow::{bail, ensure, Result};
+use fastcrypto::encoding::Hex;
 use move_core_types::{
     account_address::AccountAddress,
     ident_str,
@@ -15,7 +17,9 @@ use move_core_types::{
     value::{MoveStructLayout, MoveTypeLayout},
 };
 use move_resource_viewer::{AnnotatedMoveStruct, AnnotatedMoveValue};
+use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde_with::serde_as;
 use std::str::FromStr;
 
 /// Specific Table Object ID associated with an address
@@ -48,8 +52,13 @@ impl NamedTableID {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone, Copy, PartialOrd, Ord, Hash)]
-pub struct ObjectID(AccountAddress);
+#[serde_as]
+#[derive(Debug, Eq, PartialEq, Clone, Copy, PartialOrd, Ord, Hash, JsonSchema)]
+pub struct ObjectID(
+    #[schemars(with = "Hex")]
+    #[serde_as(as = "Readable<Hex, _>")]
+    AccountAddress,
+);
 
 impl ObjectID {
     const LENGTH: usize = h256::LENGTH;
@@ -107,6 +116,7 @@ impl std::fmt::Display for ObjectID {
 }
 
 impl MoveStructType for ObjectID {
+    const ADDRESS: AccountAddress = MOVEOS_STD_ADDRESS;
     const MODULE_NAME: &'static IdentStr = ident_str!("object_id");
     const STRUCT_NAME: &'static IdentStr = ident_str!("ObjectID");
 }
@@ -223,6 +233,7 @@ impl AccountStorage {
 }
 
 impl MoveStructType for AccountStorage {
+    const ADDRESS: AccountAddress = MOVEOS_STD_ADDRESS;
     const MODULE_NAME: &'static IdentStr = ident_str!("account_storage");
     const STRUCT_NAME: &'static IdentStr = ident_str!("AccountStorage");
 
@@ -254,6 +265,7 @@ impl TableInfo {
 }
 
 impl MoveStructType for TableInfo {
+    const ADDRESS: AccountAddress = MOVEOS_STD_ADDRESS;
     const MODULE_NAME: &'static IdentStr = ident_str!("raw_table");
     const STRUCT_NAME: &'static IdentStr = ident_str!("TableInfo");
 
@@ -344,6 +356,7 @@ impl<T> MoveStructType for Object<T>
 where
     T: MoveStructType,
 {
+    const ADDRESS: AccountAddress = MOVEOS_STD_ADDRESS;
     const MODULE_NAME: &'static IdentStr = OBJECT_MODULE_NAME;
     const STRUCT_NAME: &'static IdentStr = OBJECT_STRUCT_NAME;
 
@@ -475,6 +488,7 @@ mod tests {
     }
 
     impl MoveStructType for TestStruct {
+        const ADDRESS: AccountAddress = MOVEOS_STD_ADDRESS;
         const MODULE_NAME: &'static IdentStr = ident_str!("test");
         const STRUCT_NAME: &'static IdentStr = ident_str!("TestStruct");
     }

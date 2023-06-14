@@ -22,11 +22,30 @@
 ## Getting Started
 
 1. Build from source
-    $ cargo build && cp target/debug/rooch ~/.cargo/bin/
+    ```bash
+    cargo build && cp target/debug/rooch ~/.cargo/bin/
+    ```
 2. Create a new Move project
-    $ rooch move new my_move_project
-3. Build the Move project
-    $ cd my_move_project && rooch move build
+    ```bash
+    rooch move new my_move_project
+    ```
+3. Init Rooch config
+    ```bash
+    rooch init
+    ```
+4. Build the Move project
+    ```bash
+    cd my_move_project && rooch move build
+    ```
+5. Start the server
+    ```bash
+    rooch server start
+    ```
+> If you want more detail log for debug, you can use `RUST_LOG=debug rooch server start`
+6. Publish the Move project
+    ```bash
+    rooch move publish -p my_move_project
+    ```
 
 ## How to Contribute
 
