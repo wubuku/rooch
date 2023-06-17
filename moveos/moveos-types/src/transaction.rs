@@ -1,23 +1,18 @@
 // Copyright (c) RoochNetwork
 // SPDX-License-Identifier: Apache-2.0
 
-use std::fmt::Display;
-
 use crate::{
-    event::Event,
-    h256::{self, H256},
-    move_types::FunctionId,
-    state::StateChangeSet,
+    event::Event, h256, h256::H256, move_types::FunctionId, state::StateChangeSet,
     tx_context::TxContext,
 };
-use anyhow::Result;
 use move_core_types::{
     account_address::AccountAddress,
     effects::ChangeSet,
     language_storage::{ModuleId, TypeTag},
     vm_status::KeptVMStatus,
 };
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
+use std::fmt::Display;
 
 /// Call a Move script
 #[derive(Clone, Debug, Hash, Eq, PartialEq, Serialize, Deserialize)]
@@ -129,18 +124,6 @@ impl Display for VerifiedMoveAction {
     }
 }
 
-pub trait AuthenticatableTransaction {
-    type AuthenticatorInfo: Serialize;
-    type AuthenticatorResult: DeserializeOwned;
-
-    fn tx_hash(&self) -> H256;
-    fn authenticator_info(&self) -> Self::AuthenticatorInfo;
-    fn construct_moveos_transaction(
-        &self,
-        result: Self::AuthenticatorResult,
-    ) -> Result<MoveOSTransaction>;
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct MoveOSTransaction {
     pub ctx: TxContext,
@@ -180,4 +163,48 @@ pub struct TransactionOutput {
     pub state_changeset: StateChangeSet,
     pub events: Vec<Event>,
     pub gas_used: u64,
+}
+
+/// `TransactionExecutionInfo` represents the result of executing a transaction.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TransactionExecutionInfo {
+    /// The hash of this transaction.
+    pub tx_hash: H256,
+
+    /// The root hash of Sparse Merkle Tree describing the world state at the end of this
+    /// transaction.
+    pub state_root: H256,
+
+    /// The root hash of Merkle Accumulator storing all events emitted during this transaction.
+    pub event_root: H256,
+
+    /// The amount of gas used.
+    pub gas_used: u64,
+
+    /// The vm status. If it is not `Executed`, this will provide the general error class. Execution
+    /// failures and Move abort's receive more detailed information. But other errors are generally
+    /// categorized with no status code or other information
+    pub status: KeptVMStatus,
+}
+
+impl TransactionExecutionInfo {
+    pub fn new(
+        tx_hash: H256,
+        state_root: H256,
+        event_root: H256,
+        gas_used: u64,
+        status: KeptVMStatus,
+    ) -> TransactionExecutionInfo {
+        TransactionExecutionInfo {
+            tx_hash,
+            state_root,
+            event_root,
+            gas_used,
+            status,
+        }
+    }
+
+    pub fn id(&self) -> H256 {
+        h256::sha3_256_of(bcs::to_bytes(self).unwrap().as_slice())
+    }
 }

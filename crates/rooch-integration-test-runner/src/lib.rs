@@ -4,7 +4,9 @@
 use clap::Parser;
 use move_command_line_common::files::verify_and_create_named_address_mapping;
 use move_command_line_common::{address::ParsedAddress, values::ParsableValue};
+use move_compiler::compiled_unit::CompiledUnitEnum;
 use move_compiler::FullyCompiledProgram;
+use move_core_types::effects::{ChangeSet, Op};
 use move_transactional_test_runner::{
     framework::{CompiledState, MoveTestAdapter},
     tasks::{InitCommand, SyntaxChoice, TaskInput},
@@ -14,6 +16,7 @@ use move_vm_runtime::session::SerializedReturnValues;
 use moveos::moveos::MoveOS;
 use moveos_types::move_types::FunctionId;
 use moveos_types::object::ObjectID;
+use moveos_types::state::StateChangeSet;
 use moveos_types::state_resolver::AnnotatedStateReader;
 use moveos_types::transaction::{MoveAction, MoveOSTransaction, TransactionOutput};
 use rooch_genesis::RoochGenesis;
@@ -78,7 +81,8 @@ impl<'a> MoveTestAdapter<'a> for MoveOSTestAdapter<'a> {
         let db = moveos_store::MoveOSDB::new_with_memory_store();
 
         let genesis: &RoochGenesis = &rooch_genesis::ROOCH_GENESIS;
-        let mut moveos = MoveOS::new(db, genesis.all_natives(), genesis.config.clone()).unwrap();
+        let mut moveos =
+            MoveOS::new(db, genesis.all_natives(), genesis.config_for_test.clone()).unwrap();
 
         moveos.init_genesis(genesis.genesis_txs.clone()).unwrap();
 
@@ -98,6 +102,47 @@ impl<'a> MoveTestAdapter<'a> for MoveOSTestAdapter<'a> {
                 .unwrap();
         }
 
+        // Apply new modules and add precompiled address mapping
+        let mut change_set = ChangeSet::new();
+        let table_change_set = StateChangeSet::default();
+        if let Some(pre_compiled_lib) = pre_compiled_deps {
+            for c in &pre_compiled_lib.compiled {
+                if let CompiledUnitEnum::Module(m) = c {
+                    println!(
+                        "precompiled module: {:?}, {:?}, {:?}",
+                        m.named_module.package_name, m.named_module.address, m.named_module.name
+                    );
+                    // update named_address_mapping
+                    if let Some(named_address) = &m.address_name {
+                        let name = named_address.value.to_string();
+                        let already_assigned_with_different_value = named_address_mapping
+                            .get(&name)
+                            .filter(|existed| {
+                                existed.into_inner() != m.named_module.address.into_inner()
+                            })
+                            .is_some();
+                        if already_assigned_with_different_value {
+                            panic!(
+                                "Invalid init. The named address '{}' is already assigned with {}",
+                                name,
+                                named_address_mapping.get(&name).unwrap(),
+                            )
+                        }
+                        named_address_mapping.insert(name, m.named_module.address);
+                    }
+                    let (_, module_id) = m.module_id();
+                    let mut bytes = vec![];
+                    m.named_module.module.serialize(&mut bytes).unwrap();
+                    let op = Op::New(bytes);
+                    change_set.add_module_op(module_id, op).unwrap();
+                }
+            }
+        }
+        moveos
+            .state()
+            .apply_change_set(change_set, table_change_set)
+            .unwrap();
+
         let mut adapter = Self {
             compiled_state: CompiledState::new(named_address_mapping, pre_compiled_deps, None),
             default_syntax,
@@ -116,7 +161,6 @@ impl<'a> MoveTestAdapter<'a> for MoveOSTestAdapter<'a> {
                 .compiled_state
                 .add_and_generate_interface_file(module.clone());
         }
-
         (adapter, None)
     }
 

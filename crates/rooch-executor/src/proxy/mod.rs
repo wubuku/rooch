@@ -1,6 +1,7 @@
 // Copyright (c) RoochNetwork
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::actor::messages::{GetTransactionInfosByTxHashMessage, GetTxSeqMappingByTxOrderMessage};
 use crate::actor::{
     executor::ExecutorActor,
     messages::{
@@ -11,8 +12,10 @@ use crate::actor::{
 use anyhow::Result;
 use coerce::actor::ActorRef;
 use move_core_types::language_storage::StructTag;
+use moveos_types::h256::H256;
+use moveos_types::transaction::FunctionCall;
+use moveos_types::transaction::TransactionExecutionInfo;
 use moveos_types::transaction::TransactionOutput;
-use moveos_types::transaction::{AuthenticatableTransaction, FunctionCall};
 use moveos_types::{
     access_path::AccessPath, function_return_value::AnnotatedFunctionReturnValue,
     transaction::VerifiedMoveOSTransaction,
@@ -22,7 +25,7 @@ use moveos_types::{
     event_filter::EventFilter,
     state::{AnnotatedState, State},
 };
-use rooch_types::transaction::TransactionExecutionInfo;
+use rooch_types::transaction::{AbstractTransaction, TransactionSequenceMapping};
 
 #[derive(Clone)]
 pub struct ExecutorProxy {
@@ -36,7 +39,7 @@ impl ExecutorProxy {
 
     pub async fn validate_transaction<T>(&self, tx: T) -> Result<VerifiedMoveOSTransaction>
     where
-        T: 'static + AuthenticatableTransaction + Send + Sync,
+        T: 'static + AbstractTransaction + Send + Sync,
     {
         self.actor.send(ValidateTransactionMessage { tx }).await?
     }
@@ -93,5 +96,24 @@ impl ExecutorProxy {
         filter: EventFilter,
     ) -> Result<Vec<Option<AnnotatedMoveOSEvent>>> {
         self.actor.send(GetEventsMessage { filter }).await?
+    }
+
+    pub async fn get_tx_seq_mapping_by_tx_order(
+        &self,
+        cursor: Option<u128>,
+        limit: u64,
+    ) -> Result<Vec<TransactionSequenceMapping>> {
+        self.actor
+            .send(GetTxSeqMappingByTxOrderMessage { cursor, limit })
+            .await?
+    }
+
+    pub async fn get_transaction_infos_by_tx_hash(
+        &self,
+        tx_hashes: Vec<H256>,
+    ) -> Result<Vec<Option<TransactionExecutionInfo>>> {
+        self.actor
+            .send(GetTransactionInfosByTxHashMessage { tx_hashes })
+            .await?
     }
 }

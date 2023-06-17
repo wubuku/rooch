@@ -1,12 +1,14 @@
 // Copyright (c) RoochNetwork
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{addresses::MOVEOS_STD_ADDRESS, state::MoveStructState};
+use crate::{
+    addresses::MOVEOS_STD_ADDRESS,
+    state::{MoveStructState, MoveStructType},
+};
 use move_core_types::{
     account_address::AccountAddress,
     ident_str,
     identifier::IdentStr,
-    move_resource::MoveStructType,
     value::{MoveStructLayout, MoveTypeLayout},
 };
 use serde::{Deserialize, Serialize};
@@ -30,7 +32,7 @@ impl MoveStructType for MoveModule {
 }
 
 impl MoveStructState for MoveModule {
-    fn move_layout() -> move_core_types::value::MoveStructLayout {
+    fn struct_layout() -> move_core_types::value::MoveStructLayout {
         MoveStructLayout::new(vec![MoveTypeLayout::Vector(Box::new(MoveTypeLayout::U8))])
     }
 }

@@ -1,7 +1,7 @@
 // Copyright (c) RoochNetwork
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::coin_id::CoinID;
+use crate::{addresses::ROOCH_FRAMEWORK_ADDRESS, coin_id::CoinID};
 use anyhow::Result;
 use bech32::{FromBase32, ToBase32};
 use bitcoin::{
@@ -9,10 +9,18 @@ use bitcoin::{
     PubkeyHash,
 };
 use ethers::types::H160;
-use move_core_types::account_address::AccountAddress;
+use move_core_types::{
+    account_address::AccountAddress,
+    ident_str,
+    identifier::IdentStr,
+    value::{MoveStructLayout, MoveTypeLayout},
+};
 #[cfg(any(test, feature = "fuzzing"))]
 use moveos_types::h256;
-use moveos_types::h256::H256;
+use moveos_types::{
+    h256::H256,
+    state::{MoveStructState, MoveStructType},
+};
 #[cfg(any(test, feature = "fuzzing"))]
 use proptest::{collection::vec, prelude::*};
 #[cfg(any(test, feature = "fuzzing"))]
@@ -45,6 +53,10 @@ impl MultiChainAddress {
         })
     }
 
+    pub fn is_rooch_address(&self) -> bool {
+        self.coin_id == CoinID::ROH
+    }
+
     pub fn from_bech32(bech32: &str) -> Result<Self> {
         let (hrp, data, variant) = bech32::decode(bech32)?;
         if variant != bech32::Variant::Bech32 {
@@ -74,6 +86,10 @@ impl MultiChainAddress {
             bech32::Variant::Bech32,
         )
         .expect("bech32 encode should success")
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        bcs::to_bytes(self).expect("bcs encode should success")
     }
 }
 
@@ -116,6 +132,9 @@ impl<'de> Deserialize<'de> for MultiChainAddress {
     }
 }
 
+//TODO do not use bech32 to represent address
+//Use coin_id:original_address to represent coin address,
+//eth:0x1234.., btc:1px99y..., roh:0x1234..
 impl std::fmt::Display for MultiChainAddress {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.to_bech32())
@@ -130,6 +149,20 @@ impl FromStr for MultiChainAddress {
     }
 }
 
+impl MoveStructType for MultiChainAddress {
+    const ADDRESS: AccountAddress = ROOCH_FRAMEWORK_ADDRESS;
+    const MODULE_NAME: &'static IdentStr = ident_str!("address_mapping");
+    const STRUCT_NAME: &'static IdentStr = ident_str!("MultiChainAddress");
+}
+
+impl MoveStructState for MultiChainAddress {
+    fn struct_layout() -> MoveStructLayout {
+        MoveStructLayout::new(vec![
+            MoveTypeLayout::U32,
+            MoveTypeLayout::Vector(Box::new(MoveTypeLayout::U8)),
+        ])
+    }
+}
 /// Rooch address type
 #[derive(Copy, Clone, Ord, PartialOrd, PartialEq, Eq, Hash)]
 pub struct RoochAddress(pub H256);
