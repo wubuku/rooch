@@ -1,0 +1,56 @@
+aggregates:
+  Article:
+    metadata:
+      Preprocessors: ["CRUD_IT"]
+    id:
+      name: Id
+      type: ObjectID
+
+    properties:
+      Title:
+        type: String
+        length: 200
+      Body:
+        type: String
+        length: 2000
+      Comments:
+        itemType: Comment
+
+    entities:
+      Comment:
+        id:
+          name: CommentSeqId
+          type: u64
+        properties:
+          Commenter:
+            type: String
+            length: 100
+          Body:
+            type: String
+            length: 500
+
+    methods:
+      Create:
+        isCreationCommand: true
+        event:
+          name: ArticleCreated
+        parameters:
+          Title:
+            type: String
+            length: 200
+          Body:
+            type: String
+            length: 2000
+      Update:
+        event:
+          name: ArticleUpdated
+        parameters:
+          Title:
+            type: String
+            length: 200
+          Body:
+            type: String
+            length: 2000
+      Delete:
+        event:
+          name: ArticleDeleted
