@@ -44,28 +44,28 @@ module moveos_std::object {
 
     #[private_generics(T)]
     //TODO should this require private generic?
-    public fun borrow<T>(this: &Object<T>): &T {
-        &this.value
+    public fun borrow<T>(self: &Object<T>): &T {
+        &self.value
     }
 
     #[private_generics(T)]
     /// Borrow the object mutable value
-    public fun borrow_mut<T>(this: &mut Object<T>): &mut T {
-        &mut this.value
+    public fun borrow_mut<T>(self: &mut Object<T>): &mut T {
+        &mut self.value
     }
 
     #[private_generics(T)]
     /// Transfer object to recipient
-    public fun transfer<T: key>(this: &mut Object<T>, recipient: address) {
-        this.owner = recipient;
+    public fun transfer<T: key>(self: &mut Object<T>, recipient: address) {
+        self.owner = recipient;
     }
 
-    public fun id<T>(this: &Object<T>): ObjectID {
-        this.id
+    public fun id<T>(self: &Object<T>): ObjectID {
+        self.id
     }
 
-    public fun owner<T>(this: &Object<T>): address {
-        this.owner
+    public fun owner<T>(self: &Object<T>): address {
+        self.owner
     }
 
     #[private_generics(T)]
@@ -73,5 +73,30 @@ module moveos_std::object {
         let Object{id, owner, value} = obj;
         (id, owner, value)
     }
- 
+
+    #[test_only]
+    struct TestObject has key {
+        count: u64,
+    }
+
+    #[test(sender = @0x2)]
+    fun test_object(sender: signer) {
+        let sender_addr = std::signer::address_of(&sender);
+        let tx_context = moveos_std::tx_context::new_test_context(sender_addr);
+        let object_count = 12;
+        let object = TestObject {
+            count: object_count,
+        };
+        let obj = new<TestObject>(&mut tx_context, sender_addr, object);
+
+        let borrow_object = borrow_mut(&mut obj);
+        assert!(borrow_object.count == object_count, 1001);
+
+        transfer(&mut obj, @0x10);
+        let obj_owner = owner(&obj);
+        assert!(obj_owner != sender_addr, 1002);
+
+        let (_id, _owner, test_obj) = unpack(obj);
+        let TestObject{count: _count} = test_obj;
+    }
 }

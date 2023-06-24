@@ -31,7 +31,7 @@
     ```bash
     rooch server start
     ```
-> If you want more detail log for debug, you can use `RUST_LOG=debug rooch server start`
+> If you want a more detailed log for debugging, you can use `RUST_LOG=debug rooch server start`
 6. Publish the Move project
     ```bash
     rooch move publish -p my_move_project
@@ -43,15 +43,15 @@
 
 Storage Abstraction module overview:
 
-![Storage Abstraction](./docs/design/rooch-design-storage-abstraction.svg)
+![Storage Abstraction](./docs/static/design/rooch-design-storage-abstraction.svg)
 
 State DB:
 
-![State DB](./docs/design/rooch-design-statedb.svg)
+![State DB](./docs/static/design/rooch-design-statedb.svg)
 
 ### [Transaction Flow](./docs/design/transaction_flow.md)
 
-![Rooch Transaction Flow](./docs/design/rooch-design-transaction-flow-functional-perspective.svg)
+![Rooch Transaction Flow](./docs/static/design/rooch-design-transaction-flow-functional-perspective.svg)
 
 ## Components
 * [MoveOS](./moveos): MoveOS is a standalone Move runtime environment based on [MoveVM](https://github.com/move-language/move). It provide Move execution environment for rooch.
