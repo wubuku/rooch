@@ -12,7 +12,9 @@ module rooch_demo::article_delete_logic {
     ): article::ArticleDeleted {
         let _ = storage_ctx;
         let _ = account;
-        article::new_article_deleted(article_obj)
+        article::new_article_deleted(
+            article_obj,
+        )
     }
 
     public(friend) fun mutate(
@@ -22,8 +24,8 @@ module rooch_demo::article_delete_logic {
     ): Object<article::Article> {
         let id = article::id(&article_obj);
         let _ = storage_ctx;
+        let _ = id;
         let _ = article_deleted;
-        let _ = id; //todo support delete article object
         article_obj
     }
 }
