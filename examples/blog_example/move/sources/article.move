@@ -16,6 +16,8 @@ module rooch_demo::article {
     use std::option;
     use std::signer;
     use std::string::String;
+    friend rooch_demo::article_add_comment_logic;
+    friend rooch_demo::article_remove_comment_logic;
     friend rooch_demo::article_create_logic;
     friend rooch_demo::article_update_logic;
     friend rooch_demo::article_delete_logic;
@@ -106,6 +108,70 @@ module rooch_demo::article {
             title,
             body,
             comments: table::new<u64, Comment>(tx_ctx),
+        }
+    }
+
+    struct CommentAdded has key {
+        id: ObjectID,
+        version: u64,
+        comment_seq_id: u64,
+        commenter: String,
+        body: String,
+    }
+
+    public fun comment_added_id(comment_added: &CommentAdded): ObjectID {
+        comment_added.id
+    }
+
+    public fun comment_added_comment_seq_id(comment_added: &CommentAdded): u64 {
+        comment_added.comment_seq_id
+    }
+
+    public fun comment_added_commenter(comment_added: &CommentAdded): String {
+        comment_added.commenter
+    }
+
+    public fun comment_added_body(comment_added: &CommentAdded): String {
+        comment_added.body
+    }
+
+    public(friend) fun new_comment_added(
+        article_obj: &Object<Article>,
+        comment_seq_id: u64,
+        commenter: String,
+        body: String,
+    ): CommentAdded {
+        CommentAdded {
+            id: id(article_obj),
+            version: version(article_obj),
+            comment_seq_id,
+            commenter,
+            body,
+        }
+    }
+
+    struct CommentRemoved has key {
+        id: ObjectID,
+        version: u64,
+        comment_seq_id: u64,
+    }
+
+    public fun comment_removed_id(comment_removed: &CommentRemoved): ObjectID {
+        comment_removed.id
+    }
+
+    public fun comment_removed_comment_seq_id(comment_removed: &CommentRemoved): u64 {
+        comment_removed.comment_seq_id
+    }
+
+    public(friend) fun new_comment_removed(
+        article_obj: &Object<Article>,
+        comment_seq_id: u64,
+    ): CommentRemoved {
+        CommentRemoved {
+            id: id(article_obj),
+            version: version(article_obj),
+            comment_seq_id,
         }
     }
 
@@ -253,6 +319,14 @@ module rooch_demo::article {
             comments,
         } = article;
         table::destroy_empty(comments);
+    }
+
+    public(friend) fun emit_comment_added(storage_ctx: &mut StorageContext, comment_added: CommentAdded) {
+        events::emit_event(storage_ctx, comment_added);
+    }
+
+    public(friend) fun emit_comment_removed(storage_ctx: &mut StorageContext, comment_removed: CommentRemoved) {
+        events::emit_event(storage_ctx, comment_removed);
     }
 
     public(friend) fun emit_article_created(storage_ctx: &mut StorageContext, article_created: ArticleCreated) {

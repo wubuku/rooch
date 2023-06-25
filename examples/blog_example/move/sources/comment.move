@@ -5,9 +5,11 @@
 
 module rooch_demo::comment {
     use std::string::String;
-    friend rooch_demo::article_delete_logic;
+    friend rooch_demo::article_add_comment_logic;
+    friend rooch_demo::article_remove_comment_logic;
     friend rooch_demo::article_create_logic;
     friend rooch_demo::article_update_logic;
+    friend rooch_demo::article_delete_logic;
     friend rooch_demo::article;
 
     const EID_DATA_TOO_LONG: u64 = 102;

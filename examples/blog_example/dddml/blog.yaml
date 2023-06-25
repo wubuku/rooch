@@ -29,7 +29,7 @@ aggregates:
             type: String
             length: 500
 
-#    methods:
+    methods:
 #      Create:
 #        isCreationCommand: true
 #        event:
@@ -56,4 +56,21 @@ aggregates:
 #        event:
 #          name: ArticleDeleted
 
-
+      AddComment:
+        event:
+          name: CommentAdded
+        parameters:
+          CommentSeqId:
+            type: u64
+          Commenter:
+            type: String
+            length: 100
+          Body:
+            type: String
+            length: 500
+      RemoveComment:
+        event:
+          name: CommentRemoved
+        parameters:
+          CommentSeqId:
+            type: u64
