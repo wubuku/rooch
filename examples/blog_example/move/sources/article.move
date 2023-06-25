@@ -16,9 +16,9 @@ module rooch_demo::article {
     use std::option;
     use std::signer;
     use std::string::String;
+    friend rooch_demo::article_delete_logic;
     friend rooch_demo::article_create_logic;
     friend rooch_demo::article_update_logic;
-    friend rooch_demo::article_delete_logic;
     friend rooch_demo::article_aggregate;
 
     const EID_DATA_TOO_LONG: u64 = 102;
@@ -109,6 +109,24 @@ module rooch_demo::article {
         }
     }
 
+    struct ArticleDeleted has key {
+        id: ObjectID,
+        version: u64,
+    }
+
+    public fun article_deleted_id(article_deleted: &ArticleDeleted): ObjectID {
+        article_deleted.id
+    }
+
+    public(friend) fun new_article_deleted(
+        article_obj: &Object<Article>,
+    ): ArticleDeleted {
+        ArticleDeleted {
+            id: id(article_obj),
+            version: version(article_obj),
+        }
+    }
+
     struct ArticleCreated has key {
         id: option::Option<ObjectID>,
         title: String,
@@ -174,24 +192,6 @@ module rooch_demo::article {
         }
     }
 
-    struct ArticleDeleted has key {
-        id: ObjectID,
-        version: u64,
-    }
-
-    public fun article_deleted_id(article_deleted: &ArticleDeleted): ObjectID {
-        article_deleted.id
-    }
-
-    public(friend) fun new_article_deleted(
-        article_obj: &Object<Article>,
-    ): ArticleDeleted {
-        ArticleDeleted {
-            id: id(article_obj),
-            version: version(article_obj),
-        }
-    }
-
 
     public(friend) fun create_article(
         storage_ctx: &mut StorageContext,
@@ -244,16 +244,16 @@ module rooch_demo::article {
         private_add_article(storage_ctx, article_obj);
     }
 
+    public(friend) fun emit_article_deleted(storage_ctx: &mut StorageContext, article_deleted: ArticleDeleted) {
+        events::emit_event(storage_ctx, article_deleted);
+    }
+
     public(friend) fun emit_article_created(storage_ctx: &mut StorageContext, article_created: ArticleCreated) {
         events::emit_event(storage_ctx, article_created);
     }
 
     public(friend) fun emit_article_updated(storage_ctx: &mut StorageContext, article_updated: ArticleUpdated) {
         events::emit_event(storage_ctx, article_updated);
-    }
-
-    public(friend) fun emit_article_deleted(storage_ctx: &mut StorageContext, article_deleted: ArticleDeleted) {
-        events::emit_event(storage_ctx, article_deleted);
     }
 
 }

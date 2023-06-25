@@ -12,6 +12,27 @@ module rooch_demo::article_aggregate {
     use rooch_demo::article_update_logic;
     use std::string::String;
 
+    public entry fun delete(
+        storage_ctx: &mut StorageContext,
+        account: &signer,
+        id: ObjectID,
+    ) {
+        let article_obj = article::remove_article(storage_ctx, id);
+        let article_deleted = article_delete_logic::verify(
+            storage_ctx,
+            account,
+            &article_obj,
+        );
+        let updated_article_obj = article_delete_logic::mutate(
+            storage_ctx,
+            &article_deleted,
+            article_obj,
+        );
+        article::update_version_and_add(storage_ctx, updated_article_obj);
+        article::emit_article_deleted(storage_ctx, article_deleted);
+    }
+
+
     public entry fun create(
         storage_ctx: &mut StorageContext,
         account: &signer,
@@ -56,27 +77,6 @@ module rooch_demo::article_aggregate {
         );
         article::update_version_and_add(storage_ctx, updated_article_obj);
         article::emit_article_updated(storage_ctx, article_updated);
-    }
-
-
-    public entry fun delete(
-        storage_ctx: &mut StorageContext,
-        account: &signer,
-        id: ObjectID,
-    ) {
-        let article_obj = article::remove_article(storage_ctx, id);
-        let article_deleted = article_delete_logic::verify(
-            storage_ctx,
-            account,
-            &article_obj,
-        );
-        let updated_article_obj = article_delete_logic::mutate(
-            storage_ctx,
-            &article_deleted,
-            article_obj,
-        );
-        article::update_version_and_add(storage_ctx, updated_article_obj);
-        article::emit_article_deleted(storage_ctx, article_deleted);
     }
 
 }
