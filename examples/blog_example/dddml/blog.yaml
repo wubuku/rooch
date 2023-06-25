@@ -18,6 +18,8 @@ aggregates:
 
     entities:
       Comment:
+        metadata:
+          Preprocessors: ["MOVE_CRUD_IT"]
         id:
           name: CommentSeqId
           type: u64
@@ -56,21 +58,21 @@ aggregates:
 #        event:
 #          name: ArticleDeleted
 
-      AddComment:
-        event:
-          name: CommentAdded
-        parameters:
-          CommentSeqId:
-            type: u64
-          Commenter:
-            type: String
-            length: 100
-          Body:
-            type: String
-            length: 500
-      RemoveComment:
-        event:
-          name: CommentRemoved
-        parameters:
-          CommentSeqId:
-            type: u64
+#      AddComment:
+#        event:
+#          name: CommentAdded
+#        parameters:
+#          CommentSeqId:
+#            type: u64
+#          Commenter:
+#            type: String
+#            length: 100
+#          Body:
+#            type: String
+#            length: 500
+#      RemoveComment:
+#        event:
+#          name: CommentRemoved
+#        parameters:
+#          CommentSeqId:
+#            type: u64
