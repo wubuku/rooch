@@ -13,21 +13,21 @@ aggregates:
       Body:
         type: String
         length: 2000
-      Comments:
-        itemType: Comment
-
-    entities:
-      Comment:
-        id:
-          name: CommentSeqId
-          type: u64
-        properties:
-          Commenter:
-            type: String
-            length: 100
-          Body:
-            type: String
-            length: 500
+#      Comments:
+#        itemType: Comment
+#
+#    entities:
+#      Comment:
+#        id:
+#          name: CommentSeqId
+#          type: u64
+#        properties:
+#          Commenter:
+#            type: String
+#            length: 100
+#          Body:
+#            type: String
+#            length: 500
 
     methods:
 #      Create:
@@ -51,6 +51,9 @@ aggregates:
 #          Body:
 #            type: String
 #            length: 2000
-      Delete:
-        event:
-          name: ArticleDeleted
+#      Delete:
+#        isDeletionCommand: true
+#        event:
+#          name: ArticleDeleted
+
+
