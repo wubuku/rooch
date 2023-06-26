@@ -38,11 +38,9 @@ module rooch_demo::article_update_comment_logic {
         let id = article::id(&article_obj);
         let _ = storage_ctx;
         let _ = id;
-
         let comment = article::borrow_mut_comment(&mut article_obj, comment_seq_id);
         comment::set_commenter(comment, commenter);
         comment::set_body(comment, body);
-
         article_obj
     }
 }

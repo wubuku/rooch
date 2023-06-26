@@ -15,33 +15,6 @@ module rooch_demo::article_aggregate {
     use rooch_demo::article_update_logic;
     use std::string::String;
 
-    public entry fun update_comment(
-        storage_ctx: &mut StorageContext,
-        account: &signer,
-        id: ObjectID,
-        comment_seq_id: u64,
-        commenter: String,
-        body: String,
-    ) {
-        let article_obj = article::remove_article(storage_ctx, id);
-        let comment_updated = article_update_comment_logic::verify(
-            storage_ctx,
-            account,
-            comment_seq_id,
-            commenter,
-            body,
-            &article_obj,
-        );
-        let updated_article_obj = article_update_comment_logic::mutate(
-            storage_ctx,
-            &comment_updated,
-            article_obj,
-        );
-        article::update_version_and_add(storage_ctx, updated_article_obj);
-        article::emit_comment_updated(storage_ctx, comment_updated);
-    }
-
-
     public entry fun create(
         storage_ctx: &mut StorageContext,
         account: &signer,
@@ -157,6 +130,33 @@ module rooch_demo::article_aggregate {
         );
         article::update_version_and_add(storage_ctx, updated_article_obj);
         article::emit_comment_removed(storage_ctx, comment_removed);
+    }
+
+
+    public entry fun update_comment(
+        storage_ctx: &mut StorageContext,
+        account: &signer,
+        id: ObjectID,
+        comment_seq_id: u64,
+        commenter: String,
+        body: String,
+    ) {
+        let article_obj = article::remove_article(storage_ctx, id);
+        let comment_updated = article_update_comment_logic::verify(
+            storage_ctx,
+            account,
+            comment_seq_id,
+            commenter,
+            body,
+            &article_obj,
+        );
+        let updated_article_obj = article_update_comment_logic::mutate(
+            storage_ctx,
+            &comment_updated,
+            article_obj,
+        );
+        article::update_version_and_add(storage_ctx, updated_article_obj);
+        article::emit_comment_updated(storage_ctx, comment_updated);
     }
 
 }
