@@ -76,3 +76,15 @@ aggregates:
 #        parameters:
 #          CommentSeqId:
 #            type: u64
+      UpdateComment:
+        event:
+          name: CommentUpdated
+        parameters:
+          CommentSeqId:
+            type: u64
+          Commenter:
+            type: String
+            length: 100
+          Body:
+            type: String
+            length: 500

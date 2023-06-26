@@ -16,6 +16,7 @@ module rooch_demo::article {
     use std::option;
     use std::signer;
     use std::string::String;
+    friend rooch_demo::article_update_comment_logic;
     friend rooch_demo::article_create_logic;
     friend rooch_demo::article_update_logic;
     friend rooch_demo::article_delete_logic;
@@ -108,6 +109,45 @@ module rooch_demo::article {
             title,
             body,
             comments: table::new<u64, Comment>(tx_ctx),
+        }
+    }
+
+    struct CommentUpdated has key {
+        id: ObjectID,
+        version: u64,
+        comment_seq_id: u64,
+        commenter: String,
+        body: String,
+    }
+
+    public fun comment_updated_id(comment_updated: &CommentUpdated): ObjectID {
+        comment_updated.id
+    }
+
+    public fun comment_updated_comment_seq_id(comment_updated: &CommentUpdated): u64 {
+        comment_updated.comment_seq_id
+    }
+
+    public fun comment_updated_commenter(comment_updated: &CommentUpdated): String {
+        comment_updated.commenter
+    }
+
+    public fun comment_updated_body(comment_updated: &CommentUpdated): String {
+        comment_updated.body
+    }
+
+    public(friend) fun new_comment_updated(
+        article_obj: &Object<Article>,
+        comment_seq_id: u64,
+        commenter: String,
+        body: String,
+    ): CommentUpdated {
+        CommentUpdated {
+            id: id(article_obj),
+            version: version(article_obj),
+            comment_seq_id,
+            commenter,
+            body,
         }
     }
 
@@ -319,6 +359,10 @@ module rooch_demo::article {
             comments,
         } = article;
         table::destroy_empty(comments);
+    }
+
+    public(friend) fun emit_comment_updated(storage_ctx: &mut StorageContext, comment_updated: CommentUpdated) {
+        events::emit_event(storage_ctx, comment_updated);
     }
 
     public(friend) fun emit_article_created(storage_ctx: &mut StorageContext, article_created: ArticleCreated) {
