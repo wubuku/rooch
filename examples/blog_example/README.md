@@ -150,6 +150,22 @@ wubuku/dddappp-rooch:0.0.1 \
 rooch move build --named-addresses rooch_demo=0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4
 ```
 
+如果没有意外，合约项目可以构建成功（输出的最后一行应该显示 `Success`），但是此时应该存在一些编译警告。那是因为一些以 `_logic.move` 结尾的 Move 源代码中引入（`use`）了一些没有用到的模块。
+
+这些源代码文件是“业务逻辑”代码所在之处。如果你在 DDDML 文件中为聚合定义了一个方法（method），那么 dddappp 工具就会为你生成对应的一个名为 `{聚合名_方法名}_logic.move` 的 Move 代码文件，然后你需要在这个文件各种填充“业务逻辑”的实现代码。
+
+不过，上面我们使用的 `MOVE_CRUD_IT` 预处理器更近一步，直接为我们生成简单的 CRUD 方法的默认实现。当然，我们可以检查一下这些“填充好的默认逻辑”，视自己的需要修改它们。
+
+已经存在的“业务逻辑”代码文件是（可以执行命令 `ls sources/*_logic.move` 列出）：
+
+```shell
+sources/article_add_comment_logic.move          sources/article_delete_logic.move               sources/article_update_comment_logic.move
+sources/article_create_logic.move               sources/article_remove_comment_logic.move       sources/article_update_logic.move
+```
+
+打开它们，移除那些多余的 `use` 语句。如果你的 IDE 安装了一些 Move 语言的插件，可能你只需要使用“格式化”功能对这几个源文件重新格式化一下即可。
+
+---
 
 【TBD】
 
