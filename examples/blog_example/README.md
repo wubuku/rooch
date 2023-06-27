@@ -149,7 +149,7 @@ wubuku/dddappp-rooch:0.0.1 \
 进入 `move` 目录，这里放置的是从模型生成的 Move 合约项目。执行 Move 编译命令：
 
 ```shell
-rooch move build --named-addresses rooch_demo=0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4
+rooch move build --named-addresses rooch_demo={ACCOUNT_ADDRESS}
 ```
 
 如果没有意外，合约项目可以构建成功（输出的最后一行应该显示 `Success`），但是此时应该存在一些编译警告。那是因为一些以 `_logic.move` 结尾的 Move 源代码中引入（`use`）了一些没有用到的模块。
@@ -206,7 +206,7 @@ rooch server start
 发布 Move 合约：
 
 ```shell
-rooch move publish --named-addresses rooch_demo=0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4
+rooch move publish --named-addresses rooch_demo={ACCOUNT_ADDRESS}
 ```
 
 当你看到类似这样的输出（`status` 为 `executed`），就可以确认发布操作已经成功执行了：
@@ -228,10 +228,10 @@ rooch move publish --named-addresses rooch_demo=0xf8e38d63a5208d499725e7ac4851c4
 
 我们下面将会使用 Rooch CLI 以及其他命令行工具（`curl`、`jq`）来测试已发布的合约。
 
-使用 `rooch move run` 命令提及一个交易，初始化合约：
+使用 `rooch move run` 命令提及一个交易，初始化合约（请注意替换占位符 `{ACCOUNT_ADDRESS}` 为你拥有账户的地址）：
 
 ```shell
-rooch move run --function 0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4::rooch_demo_init::initialize --sender-account 0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4
+rooch move run --function {ACCOUNT_ADDRESS}::rooch_demo_init::initialize --sender-account {ACCOUNT_ADDRESS}
 ```
 
 #### CRUD 文章
@@ -241,7 +241,7 @@ rooch move run --function 0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf
 可以像下面这样，使用 Rooch CLI 提交一个交易，创建一篇测试文章：
 
 ```shell
-rooch move run --function 0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4::article_aggregate::create --sender-account 0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4 --args 'string:Hello' 'string:World!'
+rooch move run --function {ACCOUNT_ADDRESS}::article_aggregate::create --sender-account {ACCOUNT_ADDRESS} --args 'string:Hello' 'string:World!'
 ```
 
 然后你可以更换一下 `--args` 后面的第一个参数（`title`）和第二个参数（`body`）的内容，多创建几篇文章。
@@ -257,7 +257,7 @@ curl --location --request POST 'http://localhost:50051' \
  "id":101,
  "jsonrpc":"2.0",
  "method":"rooch_getEventsByEventHandle",
- "params":["0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4::article::ArticleCreated", null, 1000]
+ "params":["{ACCOUNT_ADDRESS}::article::ArticleCreated", null, 1000]
 }'
 ```
 
@@ -276,14 +276,14 @@ curl --location --request POST 'http://localhost:50051' \
  "id":101,
  "jsonrpc":"2.0",
  "method":"rooch_getEventsByEventHandle",
- "params":["0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4::article::ArticleCreated", null, 1000]
+ "params":["{ACCOUNT_ADDRESS}::article::ArticleCreated", null, 1000]
 }' | jq '.result.data[0].parsed_event_data.value.id.value.vec[0]'
 ```
 
-然后，你可以使用 Rooch CLI 来查询对象的状态（假设上面得到的文章的 ObjectID 为 `0xd2443e42454e8705135ca38c094fe524da6e0de0e8862b8073d4039acaf11995`）：
+然后，你可以使用 Rooch CLI 来查询对象的状态（注意将占位符 `{ARTICLE_OBJECT_ID}` 替换为上面命令得到的文章的 ObjectID）：
 
 ```shell
-rooch object --id 0xd2443e42454e8705135ca38c094fe524da6e0de0e8862b8073d4039acaf11995
+rooch object --id {ARTICLE_OBJECT_ID}
 ```
 
 ##### 更新文章
@@ -291,7 +291,7 @@ rooch object --id 0xd2443e42454e8705135ca38c094fe524da6e0de0e8862b8073d4039acaf1
 可以这样提交一个交易，更新文章：
 
 ```shell
-rooch move run --function 0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4::article_aggregate::update --sender-account 0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4 --args 'object_id:0xd2443e42454e8705135ca38c094fe524da6e0de0e8862b8073d4039acaf11995' 'string:Foo' 'string:Bar'
+rooch move run --function {ACCOUNT_ADDRESS}::article_aggregate::update --sender-account {ACCOUNT_ADDRESS} --args 'object_id:{ARTICLE_OBJECT_ID}' 'string:Foo' 'string:Bar'
 ```
 
 除了使用 Rooch CLI，你还可以通过调用 JSON RPC 来查询对象的状态：
@@ -303,7 +303,7 @@ curl --location --request POST 'http://127.0.0.1:50051/' \
  "id":101,
  "jsonrpc":"2.0",
  "method":"rooch_getAnnotatedStates",
- "params":["/object/0xd2443e42454e8705135ca38c094fe524da6e0de0e8862b8073d4039acaf11995"]
+ "params":["/object/{ARTICLE_OBJECT_ID}"]
 }'
 ```
 
@@ -312,7 +312,7 @@ curl --location --request POST 'http://127.0.0.1:50051/' \
 可以这样提交一个交易，删除文章：
 
 ```shell
-rooch move run --function 0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4::article_aggregate::delete --sender-account 0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4 --args 'object_id:0xd2443e42454e8705135ca38c094fe524da6e0de0e8862b8073d4039acaf11995'
+rooch move run --function {ACCOUNT_ADDRESS}::article_aggregate::delete --sender-account {ACCOUNT_ADDRESS} --args 'object_id:{ARTICLE_OBJECT_ID}'
 ```
 
 #### CRUD 评论
@@ -328,27 +328,27 @@ curl --location --request POST 'http://localhost:50051' \
  "id":101,
  "jsonrpc":"2.0",
  "method":"rooch_getEventsByEventHandle",
- "params":["0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4::article::ArticleCreated", null, 1000]
+ "params":["{ACCOUNT_ADDRESS}::article::ArticleCreated", null, 1000]
 }' | jq '.result.data[1].parsed_event_data.value.id.value.vec[0]'
 ```
 
-假设，得到的文章的 ObjectID 是 `0x9ab4207df54d07223f294cabd08b5c1cbcc1e262086685fcfb5a540cf62e2dae`。
-
-然后，我们可以使用这个文章的 ID，给它添加一个评论：
+然后，我们可以使用这个文章的 ID，给它添加一个评论（注意替换占位符 `{ARTICLE_OBJECT_ID}` 为上面获取到的“第二篇”文章的 ObjectID）：
 
 ```shell
-rooch move run --function 0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4::article_aggregate::add_comment --sender-account 0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4 --args 'object_id:0x9ab4207df54d07223f294cabd08b5c1cbcc1e262086685fcfb5a540cf62e2dae' 'u64:1' 'string:Anonymous' 'string:"A test comment"'
+rooch move run --function {ACCOUNT_ADDRESS}::article_aggregate::add_comment --sender-account {ACCOUNT_ADDRESS} --args 'object_id:{ARTICLE_OBJECT_ID}' 'u64:1' 'string:Anonymous' 'string:"A test comment"'
 ```
 
-我们可以给这篇文章多添加几条评论，比如（需要注意修改 `--args` 后面的第二个参数，该参数是评论的序号）：
+我们可以给这篇文章多添加几条评论，像下面这样执行命令（需要注意修改 `--args` 后面的第二个参数，该参数是评论的序号）：
 
 ```shell
-rooch move run --function 0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4::article_aggregate::add_comment --sender-account 0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4 --args 'object_id:0x9ab4207df54d07223f294cabd08b5c1cbcc1e262086685fcfb5a540cf62e2dae' 'u64:2' 'string:Anonymous2' 'string:"A test comment2"'
+rooch move run --function {ACCOUNT_ADDRESS}::article_aggregate::add_comment --sender-account {ACCOUNT_ADDRESS} --args 'object_id:{ARTICLE_OBJECT_ID}' 'u64:2' 'string:Anonymous2' 'string:"A test comment2"'
 ```
 
 ##### 查询评论
 
-然后，通过查询事件，我们知道这篇文章都有那些评论：
+在我们的合约代码中，当为一篇文章添加评论时，会 emit 一个 `CommentTableItemAdded` 事件，事件属性包含了当前文章的 ObjectID 以及添加到它的评论表的 key（即 `comment_seq_id`）。
+
+所以，通过查询事件，我们知道一篇文章有那些评论：
 
 ```shell
 curl --location --request POST 'http://localhost:50051' \
@@ -357,15 +357,15 @@ curl --location --request POST 'http://localhost:50051' \
  "id":101,
  "jsonrpc":"2.0",
  "method":"rooch_getEventsByEventHandle",
- "params":["0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4::article::CommentTableItemAdded", null, 10000]
-}' | jq '.result.data[] | select(.parsed_event_data.value.article_id == "0x9ab4207df54d07223f294cabd08b5c1cbcc1e262086685fcfb5a540cf62e2dae")'
+ "params":["{ACCOUNT_ADDRESS}::article::CommentTableItemAdded", null, 10000]
+}' | jq '.result.data[] | select(.parsed_event_data.value.article_id == "{ARTICLE_OBJECT_ID}")'
 ```
 
 在我们的 Move 合约中，一篇文章的所有评论，是保存在嵌入在该文章对象的一个类型为 `Table<u64, Comment>` 的字段中的。
 
-我们可以通过 JSON RPC 来查询评论的具体信息。
+我们可以通过 JSON RPC 来查询评论的具体信息。获取评论表（comment table）中的项目（item）需要提供两个参数的值：table handle 以及 item key。
 
-首先，我们要取得文章的评论表（comment table）的 handle：
+首先，我们要取得一篇文章的评论表的 handle：
 
 ```shell
 curl --location --request POST 'http://127.0.0.1:50051/' \
@@ -374,13 +374,13 @@ curl --location --request POST 'http://127.0.0.1:50051/' \
  "id":101,
  "jsonrpc":"2.0",
  "method":"rooch_getAnnotatedStates",
- "params":["/object/0x9ab4207df54d07223f294cabd08b5c1cbcc1e262086685fcfb5a540cf62e2dae"]
+ "params":["/object/{ARTICLE_OBJECT_ID}"]
 }' | jq '.result[0].move_value.value.value.value.comments.value.handle'
 ```
 
-假设，得到的 table handle 为 `0xad1a904b42a70fb0a64b545b4b14e7caef81dc40b7bd719aeb663f0db24dc57e`。
+我们已经知道上面已创建的一条评论的 `comment_seq_id`（即 table 的 item key）是类型为 u64 的整数值 `1`。 
 
-那么，我们可以通过下面的方式获取的评论的具体信息（get table item by handle and key）：
+那么，我们可以通过下面的方式获取的评论的具体信息（注意替换下面的占位符 `{COMMENT_TABLE_HANDLE}` 为上面获取到的“评论表”的 handle）：
 
 ```shell
 curl --location --request POST 'http://127.0.0.1:50051/' \
@@ -389,24 +389,41 @@ curl --location --request POST 'http://127.0.0.1:50051/' \
  "id":101,
  "jsonrpc":"2.0",
  "method":"rooch_getAnnotatedStates",
- "params":["/table/0xad1a904b42a70fb0a64b545b4b14e7caef81dc40b7bd719aeb663f0db24dc57e/0x0100000000000000"]
+ "params":["/table/{COMMENT_TABLE_HANDLE}/0x0100000000000000"]
 }'
 ```
 
-注意上面的命令，路径参数中的 table key 的值，它们是以十六进制字符串表示的 key 的值的 BCS 序列化的结果。
+注意上面的命令，路径参数中的 table key（在 `{COMMENT_TABLE_HANDLE}/` 之后的那部分），是以十六进制字符串表示的 key 值的 BCS 序列化的结果。
 
-比如，类型为 `u64` 的整数值 `1` 的 BCS 序列化结果，以十六进制字符串表示，为 `0x0100000000000000`。
+比如，类型为 `u64` 的整数值 `1` 的 BCS 序列化结果，以十六进制字符串表示为 `0x0100000000000000`。
 
 ##### 更新评论
 
-【TBD】
+我们可以这样提交一个交易，更新评论：
+
+```shell
+rooch move run --function {ACCOUNT_ADDRESS}::article_aggregate::update_comment --sender-account {ACCOUNT_ADDRESS} --args 'object_id:{ARTICLE_OBJECT_ID}' 'u64:1' 'string:Anonymous' 'string:"Updated test comment"'
+```
+
+然后我们可以再次查询评论的状态，看看评论内容是否已经更新：
+
+```shell
+curl --location --request POST 'http://127.0.0.1:50051/' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+ "id":101,
+ "jsonrpc":"2.0",
+ "method":"rooch_getAnnotatedStates",
+ "params":["/table/{COMMENT_TABLE_HANDLE}/0x0100000000000000"]
+}'
+```
 
 ##### 移除评论
 
 提及一个交易，移除评论：
 
 ```shell
-rooch move run --function 0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4::article_aggregate::remove_comment --sender-account 0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4 --args 'object_id:0x9ab4207df54d07223f294cabd08b5c1cbcc1e262086685fcfb5a540cf62e2dae' 'u64:1'
+rooch move run --function {ACCOUNT_ADDRESS}::article_aggregate::remove_comment --sender-account {ACCOUNT_ADDRESS} --args 'object_id:{ARTICLE_OBJECT_ID}' 'u64:1'
 ```
 
 再次执行上面的 curl 命令查询评论，这次会返回类似这样的信息：
@@ -418,9 +435,18 @@ rooch move run --function 0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf
 ~~因为我们后面这篇文章还有未被删除的评论，所以如果现在想要删除它，应该不会成功。尝试执行~~：
 
 ```shell
-rooch move run --function 0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4::article_aggregate::delete --sender-account 0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4 --args 'object_id:0x9ab4207df54d07223f294cabd08b5c1cbcc1e262086685fcfb5a540cf62e2dae'
+rooch move run --function {ACCOUNT_ADDRESS}::article_aggregate::delete --sender-account {ACCOUNT_ADDRESS} --args 'object_id:{ARTICLE_OBJECT_ID}'
 ```
 
+返回的交易执行状态应该是失败的：
 
+```json
+//[TBD]
+```
 
+### One more thing
+
+如果你有兴趣，可以参考 ["A Rooch Demo"](https://github.com/dddappp/A-Rooch-Demo#configure-off-chain-service) 的介绍，配置目录 `rooch-java-service` 下的 Java 链下服务，然后将服务运行起来。
+
+通过查询链下服务的 RESTful API，你可以更容易地查询到文件和评论的具体信息，而不需要使用上面介绍的 curl 和 jp 命令。
 
