@@ -8,7 +8,7 @@ use clap::ArgEnum;
 use clap::Parser;
 use pretty_assertions::assert_str_eq;
 use rooch_open_rpc::Project;
-use rooch_server::api::rooch_api::RoochAPIOpenRpc;
+use rooch_rpc_api::api::rooch_api::RoochAPIOpenRpc;
 use std::fs::File;
 use std::io::Write;
 
@@ -21,7 +21,7 @@ pub fn rooch_rpc_doc(version: &str) -> Project {
         "Rooch JSON-RPC API for interaction with rooch server. ",
         "Rooch Network",
         "https://rooch.network",
-        "build@rooch.com", // TODO: Determine the specific address
+        "opensource@rooch.network",
         "Apache-2.0",
         "https://raw.githubusercontent.com/rooch-network/rooch/main/LICENSE",
     )
