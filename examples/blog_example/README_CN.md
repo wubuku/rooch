@@ -199,7 +199,7 @@ rooch move build --named-addresses rooch_demo={ACCOUNT_ADDRESS}
 
 ### 运行 Rooch Server 以及发布合约
 
-首先，运行一个本地 Rooch 服务器。
+首先，运行一个本地 Rooch 服务器：
 
 ```shell
 rooch server start
@@ -450,5 +450,5 @@ rooch move run --function {ACCOUNT_ADDRESS}::article_aggregate::delete --sender-
 
 如果你有兴趣，可以参考 ["A Rooch Demo"](https://github.com/dddappp/A-Rooch-Demo#configure-off-chain-service) 的介绍，配置目录 `rooch-java-service` 下的 Java 链下服务，然后将服务运行起来。
 
-通过查询链下服务的 RESTful API，你可以更容易地查询到文件和评论的具体信息，而不需要使用上面介绍的 curl 和 jp 命令。
+通过查询链下服务的 RESTful API，你可以更容易地查询到文章和评论的具体信息，而不需要使用上面介绍的 curl 和 jp 命令。
 
