@@ -20,13 +20,13 @@
 
 * （可选）安装 JDK 和 Maven。用于构建和测试链下服务。
 
-## 重现 blog example 的开发过程
+## 编码（Programing）
 
-你可以按照下面的介绍重现本示例应用的开发过程。
+你可以按照下面的介绍重现本示例应用的“编码”过程。你会发现要开发一个完整的应用，你只需要编写很少的代码。如果你的应用的业务逻辑只是对一些实体进行简单的 CRUD 操作，那么你甚至可能不需要编写除了“模型”之外的任何代码。
 
 ### 编写 DDDML 模型文件
 
-我们的低代码工具依赖 DDDML（领域驱动设计建模语言）描述的领域模型来生成应用的各部分代码。
+我们介绍的低代码 dddappp 工具依赖 DDDML（领域驱动设计建模语言）描述的领域模型来生成应用的各部分代码。
 
 > **提示**
 >
@@ -71,9 +71,13 @@ aggregates:
             length: 500
 ```
 
-上面的 DDDML 模型对于开发者而言其实十分浅白，但是我们下面还是会略作解释。
+上面的 DDDML 模型对于开发者而言，含义应该十分浅白，但是我们下面还是会略作解释。
 
-这些代码定义了一个名为 `Article` 的聚合及同名聚合根（实体），以及一个名为 `Comment` 的聚合内部实体。 
+这些代码定义了一个名为 `Article` 的聚合及同名聚合根实体，以及一个名为 `Comment` 的聚合内部实体。
+
+相信稍有经验的开发者都已经了解“实体”这个概念。
+
+如果你不太了解“聚合”、“聚合根”这些 DDD 的概念，也不要紧。你可以先把聚合大致理解为“具有紧密联系的聚合根实体以及聚合内部实体的集合”，以及认为“聚合根和聚合内部实体之间是‘我拥有你’的关系”，如此即可。
 
 #### “文章”聚合
 
@@ -139,10 +143,8 @@ wubuku/dddappp-rooch:0.0.1 \
 
 上面的命令执行成功后，在本地目录 `/PATH/TO/test` 下应该会增加两个目录 `move` 以及 `rooch-java-service`。
 
-此时你可以尝试编译链下服务。进入目录 `rooch-java-service`，执行：`mvn compile`。如果没有意外，编译应该可以成功。
 
-
-## 测试应用
+### 项目源代码结构
 
 进入 `move` 目录，这里放置的是从模型生成的 Move 合约项目。执行 Move 编译命令：
 
@@ -152,30 +154,56 @@ rooch move build --named-addresses rooch_demo=0xf8e38d63a5208d499725e7ac4851c4a0
 
 如果没有意外，合约项目可以构建成功（输出的最后一行应该显示 `Success`），但是此时应该存在一些编译警告。那是因为一些以 `_logic.move` 结尾的 Move 源代码中引入（`use`）了一些没有用到的模块。
 
-这些源代码文件是“业务逻辑”代码所在之处。如果你在 DDDML 文件中为聚合定义了一个方法（method），那么 dddappp 工具就会为你生成对应的一个名为 `{聚合名_方法名}_logic.move` 的 Move 代码文件，然后你需要在这个文件各种填充“业务逻辑”的实现代码。
+此时你还可以尝试编译链下服务。进入目录 `rooch-java-service`，执行：`mvn compile`。如果没有意外，编译应该可以成功。
 
-不过，上面我们使用的 `MOVE_CRUD_IT` 预处理器更近一步，直接为我们生成简单的 CRUD 方法的默认实现。当然，我们可以检查一下这些“填充好的默认逻辑”，视自己的需要修改它们。
+#### 合约项目源代码结构
 
-已经存在的“业务逻辑”代码文件是（可以执行命令 `ls sources/*_logic.move` 列出）：
+在 `move/sources` 目录中，包含了链上合约项目的所有 Move 源代码。我们先忽略以 `_logic.move` 结尾的文件，介绍一下其他文件。
 
-```shell
-sources/article_add_comment_logic.move          sources/article_delete_logic.move               sources/article_update_comment_logic.move
-sources/article_create_logic.move               sources/article_remove_comment_logic.move       sources/article_update_logic.move
-```
+* `rooch_demo_init.move`。它包含了链上合约的初始化（`initialize`）函数。一般来说，在合约项目部署到链上后，需要首先调用它（只需要调用一次）。不过，因为我们的示例项目比较简单，所以目前工具生成的 `initialize` 函数内没有包含什么有意义的初始化逻辑，我们可以先忽略它。
+* `article_aggregate.move`。这是 entry functions 所在的地方。现在它包含的对文章和评论进行 Create、Update、Delete 操作的函数。你可以看到，创建评论这个聚合内实体的函数被命名为 `add_comment` 而不是 `create_comment`，删除评论的函数被命名为 `remove_comment` 而不是 `delete_comment`，这其实是为了更容易在阅读时分辨出这些函数是对聚合内部实体的操作，而不是对聚合本身的操作。
+* `article.move`。这个文件包含了“文章”这个聚合根实体的“数据模型”的定义，以及“文章”聚合相关的事件的定义。
+* `comment.move`。这个文件包含了“评论”这个聚合内部实体的“数据模型”的定义。
+* 下面列出的几个 Move 文件没有什么复杂的逻辑，只是提供了一些让你可以更便捷地获取事件属性（字段）值的 functions。
+  * `article_created.move`
+  * `article_deleted.move`
+  * `article_updated.move`
+  * `comment_added.move`
+  * `comment_removed.move`
+  * `comment_updated.move`
 
-打开它们，移除那些多余的 `use` 语句。如果你的 IDE 安装了一些 Move 语言的插件，可能你只需要使用“格式化”功能对这几个源文件重新格式化一下即可。
+#### 业务逻辑代码
 
----
+以 `_logic.move` 结尾的 Move 源文件是“业务逻辑”实现代码所在之处。
 
-【TBD】
+如果你在 DDDML 文件中为聚合定义了一个方法（method），那么 dddappp 工具就会为你生成对应的一个名为 `{聚合名_方法名}_logic.move` 的 Move 代码文件，然后你需要在这个文件各种填充“业务逻辑”的实现代码。
 
-先运行本地服务器。
+不过，上面我们使用的 `MOVE_CRUD_IT` 预处理器更进一步，直接为我们生成简单的 CRUD 方法的默认实现。当然，我们可以检查一下这些“填充好的默认逻辑”，视自己的需要修改它们。
+
+使用上面的模型生成项目后，已经存在的“业务逻辑”代码文件是（可执行命令 `ls sources/*_logic.move` 列出）：
+
+* article_add_comment_logic.move
+* article_delete_logic.move
+* article_update_comment_logic.move
+* article_create_logic.move
+* article_remove_comment_logic.move
+* article_update_logic.move
+
+现在就打开它们，移除那些多余的 `use` 语句。如果你的 IDE 安装了一些 Move 语言的插件，可能你只需要使用“格式化”功能对这几个源文件重新格式化一下即可。
+
+然后使用 `rooch move build` 命令重新编译 Move 项目，现在应该没有警告信息了。
+
+## 测试应用
+
+### 运行 Rooch Server 以及发布合约
+
+首先，运行一个本地 Rooch 服务器。
 
 ```shell
 rooch server start
 ```
 
-发布合约：
+发布 Move 合约：
 
 ```shell
 rooch move publish --named-addresses rooch_demo=0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4
@@ -196,19 +224,29 @@ rooch move publish --named-addresses rooch_demo=0xf8e38d63a5208d499725e7ac4851c4
 }
 ```
 
+### 使用 CLI 工具测试合约
+
+我们下面将会使用 Rooch CLI 以及其他命令行工具（`curl`、`jq`）来测试已发布的合约。
+
 使用 `rooch move run` 命令提及一个交易，初始化合约：
 
 ```shell
 rooch move run --function 0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4::rooch_demo_init::initialize --sender-account 0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4
 ```
 
-提交一个交易，创建一篇测试文章：
+#### CRUD 文章
+
+##### 创建文章
+
+可以像下面这样，使用 Rooch CLI 提交一个交易，创建一篇测试文章：
 
 ```shell
 rooch move run --function 0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4::article_aggregate::create --sender-account 0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4 --args 'string:Hello' 'string:World!'
 ```
 
 然后你可以更换一下 `--args` 后面的第一个参数（`title`）和第二个参数（`body`）的内容，多创建几篇文章。
+
+##### 查询文章
 
 现在，你可以通过查询事件，得到已创建好的文章的 `ObjectID`：
 
@@ -242,13 +280,15 @@ curl --location --request POST 'http://localhost:50051' \
 }' | jq '.result.data[0].parsed_event_data.value.id.value.vec[0]'
 ```
 
-你可以使用 Rooch CLI 来查询对象的状态（假设上面得到的文章的 ObjectID 为 `0xd2443e42454e8705135ca38c094fe524da6e0de0e8862b8073d4039acaf11995`）：
+然后，你可以使用 Rooch CLI 来查询对象的状态（假设上面得到的文章的 ObjectID 为 `0xd2443e42454e8705135ca38c094fe524da6e0de0e8862b8073d4039acaf11995`）：
 
 ```shell
 rooch object --id 0xd2443e42454e8705135ca38c094fe524da6e0de0e8862b8073d4039acaf11995
 ```
 
-提交一个交易，更新文章：
+##### 更新文章
+
+可以这样提交一个交易，更新文章：
 
 ```shell
 rooch move run --function 0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4::article_aggregate::update --sender-account 0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4 --args 'object_id:0xd2443e42454e8705135ca38c094fe524da6e0de0e8862b8073d4039acaf11995' 'string:Foo' 'string:Bar'
@@ -267,13 +307,19 @@ curl --location --request POST 'http://127.0.0.1:50051/' \
 }'
 ```
 
-提交一个交易，删除文章：
+##### 删除文章
+
+可以这样提交一个交易，删除文章：
 
 ```shell
 rooch move run --function 0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4::article_aggregate::delete --sender-account 0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4 --args 'object_id:0xd2443e42454e8705135ca38c094fe524da6e0de0e8862b8073d4039acaf11995'
 ```
 
-再获取另外一篇文章的 ObjectID（注意 `jq` 命令的路径参数 `.result.data[1]`，我们打算获取的是“第二个” `ArticleCreated` 事件的信息）：
+#### CRUD 评论
+
+##### 添加评论
+
+让我们再获取另一篇文章的 ObjectID（注意下面 `jq` 命令的路径参数 `.result.data[1]`，我们打算获取的是“第二个” `ArticleCreated` 事件的信息）：
 
 ```shell
 curl --location --request POST 'http://localhost:50051' \
@@ -299,6 +345,8 @@ rooch move run --function 0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf
 ```shell
 rooch move run --function 0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4::article_aggregate::add_comment --sender-account 0xf8e38d63a5208d499725e7ac4851c4a0836e45e2230041b7e3cf43e4738c47b4 --args 'object_id:0x9ab4207df54d07223f294cabd08b5c1cbcc1e262086685fcfb5a540cf62e2dae' 'u64:2' 'string:Anonymous2' 'string:"A test comment2"'
 ```
+
+##### 查询评论
 
 然后，通过查询事件，我们知道这篇文章都有那些评论：
 
@@ -348,6 +396,12 @@ curl --location --request POST 'http://127.0.0.1:50051/' \
 注意上面的命令，路径参数中的 table key 的值，它们是以十六进制字符串表示的 key 的值的 BCS 序列化的结果。
 
 比如，类型为 `u64` 的整数值 `1` 的 BCS 序列化结果，以十六进制字符串表示，为 `0x0100000000000000`。
+
+##### 更新评论
+
+【TBD】
+
+##### 移除评论
 
 提及一个交易，移除评论：
 
