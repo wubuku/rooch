@@ -201,19 +201,19 @@ rooch move build --named-addresses rooch_examples={ACCOUNT_ADDRESS}
 
 有可能你觉得默认生成的 CRUD 逻辑不符合你的需求，比如，你可能想要添加评论时不需要传递 `Owner` 参数给 `entry fun add_comment`，而是直接使用发送者的账户地址作为 Owner，那么这个需求目前可以这样满足：
 
-首先，从 dddml 模型文档中的 `Comment` 实体定义中移除对 `MOVE_CRUD_IT` 预处理器的使用。
-
-然后，在模型文件中像这样自定义一个方法：
+首先，在模型文件中像这样自定义一个方法：
 
 ```yaml
 aggregates:
   Article:
-  # ...
-
+    # ...
     methods:
       AddComment:
         event:
           name: CommentAdded
+          properties:
+            Owner:
+              type: address
         parameters:
           CommentSeqId:
             type: u64
@@ -225,9 +225,9 @@ aggregates:
 
 注意，上面的方法参数列表中已经没有 `Owner` 参数。
 
-然后，删除 `article_add_comment_logic.move` 文件，再次运行 dddappp 工具。
+然后，删除 `article_add_comment_logic.move` 文件，再次运行 dddappp 工具。（注意，因为工具默认不会覆盖已经存在的 `*_logic.move` 文件，所以你需要手动删除它。）
 
-在重新生成的 `article_add_comment_logic.move` 文件中，`verify` 函数除了签名部分外，函数体是空的，你需要自己在其中填充业务逻辑代码。
+打开重新生成的 `article_add_comment_logic.move` 文件中，找到 `verify` 函数，在函数体中填充你想要的业务逻辑代码。
 
 ## 测试应用
 

@@ -200,19 +200,19 @@ In this example, the `MOVE_CRUD_IT` preprocessor already generates the full CRUD
 
 It is possible that you feel that the default generated CRUD logic does not meet your needs, for example, you may want to add comment without passing the `Owner` argument to `entry fun add_comment` and directly use the sender account address as the owner, then this requirement can currently be satisfied as follows.
 
-First, remove the use of the `MOVE_CRUD_IT` preprocessor from the `Comment` entity definition in the dddml model document.
-
-Then, define a custom method in the model file like this:
+First, define a custom method in the model file like this:
 
 ```yaml
 aggregates:
   Article:
-  # ...
-
+    # ...
     methods:
       AddComment:
         event:
           name: CommentAdded
+          properties:
+            Owner:
+              type: address
         parameters:
           CommentSeqId:
             type: u64
@@ -224,9 +224,9 @@ aggregates:
 
 Note that the `Owner` parameter is no longer present in the method parameters above.
 
-Then, delete `article_add_comment_logic.move`, run the dddappp tool again.
+Then, delete `article_add_comment_logic.move`, run the dddappp tool again. (Note that since the tool does not overwrite the already existing `*_logic.move` file by default, you will need to delete it manually.)
 
-In the regenerated `article_add_comment_logic.move` file, the `verify` function will have an empty body except for the signature part. You will need to fill it in yourself.
+Open the regenerated `article_add_comment_logic.move` file, find the `verify` function, fill the function body with the business logic code you want.
 
 ## Test Application
 
