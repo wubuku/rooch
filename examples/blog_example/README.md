@@ -194,6 +194,40 @@ Now open them and remove those redundant `use` statements. If your IDE has some 
 
 Then use `rooch move build` command to recompile Move project. Now there should be no warning messages.
 
+### Implementing Custom Business Logic (when necessary)
+
+In this example, the `MOVE_CRUD_IT` preprocessor already generates the full CRUD methods for us. If CRUD is all the business logic you need, then you don't have to write another line of code.
+
+It is possible that you feel that the default generated CRUD logic does not meet your needs, for example, you may want to add comment without passing the `Owner` argument to `entry fun add_comment` and directly use the sender account address as the owner, then this requirement can currently be satisfied as follows.
+
+First, remove the use of the `MOVE_CRUD_IT` preprocessor from the `Comment` entity definition in the dddml model document.
+
+Then, define a custom method in the model file like this:
+
+```yaml
+aggregates:
+  Article:
+  # ...
+
+    methods:
+      AddComment:
+        event:
+          name: CommentAdded
+        parameters:
+          CommentSeqId:
+            type: u64
+          Commenter:
+            type: String
+          Body:
+            type: String
+```
+
+Note that the `Owner` parameter is no longer present in the method parameters above.
+
+Then, delete `article_add_comment_logic.move`, run the dddappp tool again.
+
+In the regenerated `article_add_comment_logic.move` file, the `verify` function will have an empty body except for the signature part. You will need to fill it in yourself.
+
 ## Test Application
 
 ### Run Rooch Server and Publish Contracts
