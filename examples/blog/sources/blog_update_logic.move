@@ -25,6 +25,7 @@ module rooch_examples::blog_update_logic {
 
     public(friend) fun mutate(
         storage_ctx: &mut StorageContext,
+        _account: &signer,
         blog_updated: &blog::BlogUpdated,
         blog: blog::Blog,
     ): blog::Blog {

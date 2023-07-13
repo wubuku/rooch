@@ -23,6 +23,7 @@ module rooch_examples::blog_create_logic {
 
     public(friend) fun mutate(
         storage_ctx: &mut StorageContext,
+        _account: &signer,
         blog_created: &blog::BlogCreated,
     ): blog::Blog {
         let name = blog_created::name(blog_created);

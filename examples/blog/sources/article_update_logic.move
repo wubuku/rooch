@@ -25,6 +25,7 @@ module rooch_examples::article_update_logic {
 
     public(friend) fun mutate(
         storage_ctx: &mut StorageContext,
+        _account: &signer,
         article_updated: &article::ArticleUpdated,
         article_obj: Object<article::Article>,
     ): Object<article::Article> {

@@ -19,6 +19,7 @@ module rooch_examples::article_delete_logic {
 
     public(friend) fun mutate(
         storage_ctx: &mut StorageContext,
+        _account: &signer,
         article_deleted: &article::ArticleDeleted,
         article_obj: Object<article::Article>,
     ): Object<article::Article> {

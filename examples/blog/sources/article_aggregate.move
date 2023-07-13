@@ -36,6 +36,7 @@ module rooch_examples::article_aggregate {
         );
         let updated_article_obj = article_update_comment_logic::mutate(
             storage_ctx,
+            account,
             &comment_updated,
             article_obj,
         );
@@ -59,6 +60,7 @@ module rooch_examples::article_aggregate {
         );
         let updated_article_obj = article_remove_comment_logic::mutate(
             storage_ctx,
+            account,
             &comment_removed,
             article_obj,
         );
@@ -86,6 +88,7 @@ module rooch_examples::article_aggregate {
         );
         let updated_article_obj = article_add_comment_logic::mutate(
             storage_ctx,
+            account,
             &comment_added,
             article_obj,
         );
@@ -108,6 +111,7 @@ module rooch_examples::article_aggregate {
         );
         let article_obj = article_create_logic::mutate(
             storage_ctx,
+            account,
             &article_created,
         );
         article::set_article_created_id(&mut article_created, article::id(&article_obj));
@@ -133,6 +137,7 @@ module rooch_examples::article_aggregate {
         );
         let updated_article_obj = article_update_logic::mutate(
             storage_ctx,
+            account,
             &article_updated,
             article_obj,
         );
@@ -154,6 +159,7 @@ module rooch_examples::article_aggregate {
         );
         let updated_article_obj = article_delete_logic::mutate(
             storage_ctx,
+            account,
             &article_deleted,
             article_obj,
         );

@@ -18,6 +18,7 @@ module rooch_examples::blog_delete_logic {
 
     public(friend) fun mutate(
         storage_ctx: &mut StorageContext,
+        _account: &signer,
         blog_deleted: &blog::BlogDeleted,
         blog: blog::Blog,
     ): blog::Blog {

@@ -26,6 +26,7 @@ module rooch_examples::article_remove_comment_logic {
 
     public(friend) fun mutate(
         storage_ctx: &mut StorageContext,
+        _account: &signer,
         comment_removed: &article::CommentRemoved,
         article_obj: Object<article::Article>,
     ): Object<article::Article> {

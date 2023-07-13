@@ -26,6 +26,7 @@ module rooch_examples::blog_aggregate {
         );
         let blog = blog_create_logic::mutate(
             storage_ctx,
+            account,
             &blog_created,
         );
         blog::add_blog(storage_ctx, account, blog);
@@ -49,6 +50,7 @@ module rooch_examples::blog_aggregate {
         );
         let updated_blog = blog_update_logic::mutate(
             storage_ctx,
+            account,
             &blog_updated,
             blog,
         );
@@ -69,6 +71,7 @@ module rooch_examples::blog_aggregate {
         );
         let updated_blog = blog_delete_logic::mutate(
             storage_ctx,
+            account,
             &blog_deleted,
             blog,
         );

@@ -149,6 +149,10 @@ module rooch_examples::blog {
         } = blog;
     }
 
+    public(friend) fun borrow_mut_blog(storage_ctx: &mut StorageContext): &mut Blog {
+        account_storage::global_borrow_mut<Blog>(storage_ctx, @rooch_examples)
+    }
+
     public fun borrow_blog(storage_ctx: &mut StorageContext): &Blog {
         account_storage::global_borrow<Blog>(storage_ctx, @rooch_examples)
     }
