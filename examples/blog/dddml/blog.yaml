@@ -1,7 +1,7 @@
 aggregates:
   Article:
     metadata:
-      Preprocessors: ["MOVE_CRUD_IT"]
+      Preprocessors: [ "MOVE_CRUD_IT" ]
     id:
       name: Id
       type: ObjectID
@@ -21,7 +21,7 @@ aggregates:
     entities:
       Comment:
         metadata:
-          Preprocessors: ["MOVE_CRUD_IT"]
+          Preprocessors: [ "MOVE_CRUD_IT" ]
         id:
           name: CommentSeqId
           type: u64
@@ -71,3 +71,12 @@ aggregates:
             type: String
           Body:
             type: String
+
+singletonObjects:
+  Blog:
+    metadata:
+      Preprocessors: [ "MOVE_CRUD_IT" ]
+    properties:
+      Name:
+        type: String
+        length: 200
