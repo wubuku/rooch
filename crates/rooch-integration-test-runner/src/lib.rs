@@ -351,7 +351,7 @@ pub fn run_integration_test_with_extended_check(
         })
         .collect::<Vec<_>>();
 
-    let global_env = build_model(dep_package_path, named_account_address_map, None).unwrap();
+    let global_env = build_model(dep_package_path, named_account_address_map, false, None).unwrap();
 
     let _ = run_extended_checks(&global_env);
 
@@ -362,7 +362,7 @@ pub fn run_integration_test_with_extended_check(
             let buffer_output = String::from_utf8_lossy(buffer.as_slice()).to_string();
             let re = Regex::new("(/.*)(.move:[0-9]+:[0-9]+)").unwrap();
             Some(
-                re.replace(buffer_output.as_str(), "/tmp/tempfile$2".to_string())
+                re.replace(buffer_output.as_str(), "/tmp/tempfile$2".to_owned())
                     .to_string(),
             )
         } else {

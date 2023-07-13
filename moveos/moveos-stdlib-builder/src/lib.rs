@@ -110,12 +110,7 @@ impl Stdlib {
             .clone()
             .compile_package_no_exit(&package_path, &mut stderr())?;
 
-        let additional_named_address = options.named_addresses;
-        run_verifier(
-            &package_path,
-            additional_named_address,
-            &mut compiled_package,
-        )?;
+        run_verifier(&package_path, build_config.clone(), &mut compiled_package)?;
         let module_map = compiled_package.root_modules_map();
         let mut modules = module_map.iter_modules().into_iter();
 
@@ -145,7 +140,7 @@ impl Stdlib {
             toc_depth: Option::None,
             no_collapsed_sections: false,
             output_directory: None,
-            template: vec!["doc_template/README.md".to_string()],
+            template: vec!["doc_template/README.md".to_owned()],
             references_file: Option::None,
             include_dep_diagrams: false,
             include_call_diagrams: false,

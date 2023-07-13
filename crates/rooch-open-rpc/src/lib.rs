@@ -39,7 +39,7 @@ impl Project {
         license: &str,
         license_url: &str,
     ) -> Self {
-        let openrpc: String = "1.2.6".to_string();
+        let openrpc: String = "1.2.6".to_owned();
         Self {
             openrpc,
             info: Info {
@@ -230,7 +230,7 @@ impl ExamplePairing {
                 })
                 .collect(),
             result: Example {
-                name: "Result".to_string(),
+                name: "Result".to_owned(),
                 summary: None,
                 description: None,
                 value: result,
@@ -309,7 +309,7 @@ impl Default for RpcModuleDocBuilder {
     fn default() -> Self {
         let schema_generator = SchemaSettings::default()
             .with(|s| {
-                s.definitions_path = "#/components/schemas/".to_string();
+                s.definitions_path = "#/components/schemas/".to_owned();
             })
             .into_generator();
 
@@ -446,23 +446,4 @@ struct Components {
     content_descriptors: BTreeMap<String, ContentDescriptor>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     schemas: BTreeMap<String, SchemaObject>,
-}
-
-#[test]
-fn test_json_rpc_spec() {
-    // If this test breaks and you intended a json rpc schema change, you need to run to get the fresh schema:
-    // # cargo -q run --example generate-json-rpc-spec -- record
-    let status = std::process::Command::new("cargo")
-        .args(["run", "--example", "generate-json-rpc-spec", "--"])
-        .arg("test")
-        .status()
-        .expect("msg");
-
-    assert!(
-        status.success(),
-            "\n\
-    If this test breaks and you intended a json rpc schema change, you need to run to get the fresh schema:\n\
-    ./scripts/generate_json_rpc_spec.sh
-            "
-        );
 }

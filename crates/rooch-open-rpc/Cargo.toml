@@ -25,11 +25,3 @@ clap = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["full"] }
 fastcrypto = { workspace = true }
 rand = { workspace = true }
-rooch-rpc-server = { workspace = true }
-rooch-rpc-api = { workspace = true }
-
-
-[[example]]
-name = "generate-json-rpc-spec"
-path = "src/generate_json_rpc_spec.rs"
-test = false
