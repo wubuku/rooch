@@ -42,7 +42,7 @@
 aggregates:
   Article:
     metadata:
-      Preprocessors: ["MOVE_CRUD_IT"]
+      Preprocessors: [ "MOVE_CRUD_IT" ]
     id:
       name: Id
       type: ObjectID
@@ -56,11 +56,10 @@ aggregates:
         length: 2000
       Comments:
         itemType: Comment
-
     entities:
       Comment:
         metadata:
-          Preprocessors: ["MOVE_CRUD_IT"]
+          Preprocessors: [ "MOVE_CRUD_IT" ]
         id:
           name: CommentSeqId
           type: u64
@@ -71,6 +70,8 @@ aggregates:
           Body:
             type: String
             length: 500
+          Owner:
+            type: address
 ```
 
 上面的 DDDML 模型对于开发者而言，含义应该十分浅白，但是我们下面还是会略作解释。
@@ -194,40 +195,7 @@ rooch move build --named-addresses rooch_examples={ACCOUNT_ADDRESS}
 
 然后使用 `rooch move build` 命令重新编译 Move 项目，现在应该没有警告信息了。
 
-
-### 实现自定义业务逻辑（在必要时）
-
-在这个例子中，`MOVE_CRUD_IT` 预处理器已经为我们生成了完整的 CRUD 方法。如果 CRUD 是你需要的所有业务逻辑，那么你不需要再写一行代码。
-
-有可能你觉得默认生成的 CRUD 逻辑不符合你的需求，比如，你可能想要添加评论时不需要传递 `Owner` 参数给 `entry fun add_comment`，而是直接使用发送者的账户地址作为 Owner，那么这个需求目前可以这样满足：
-
-首先，在模型文件中像这样自定义一个方法：
-
-```yaml
-aggregates:
-  Article:
-    # ...
-    methods:
-      AddComment:
-        event:
-          name: CommentAdded
-          properties:
-            Owner:
-              type: address
-        parameters:
-          CommentSeqId:
-            type: u64
-          Commenter:
-            type: String
-          Body:
-            type: String
-```
-
-注意，上面的方法参数列表中已经没有 `Owner` 参数。
-
-然后，删除 `article_add_comment_logic.move` 文件，再次运行 dddappp 工具。（注意，因为工具默认不会覆盖已经存在的 `*_logic.move` 文件，所以你需要手动删除它。）
-
-打开重新生成的 `article_add_comment_logic.move` 文件中，找到 `verify` 函数，在函数体中填充你想要的业务逻辑代码。
+现在，你可以开始测试这个应用了。
 
 ## 测试应用
 
@@ -277,7 +245,7 @@ rooch move run --function {ACCOUNT_ADDRESS}::rooch_blog_demo_init::initialize --
 可以像下面这样，使用 Rooch CLI 提交一个交易，创建一篇测试文章：
 
 ```shell
-rooch move run --function {ACCOUNT_ADDRESS}::article_aggregate::create --sender-account {ACCOUNT_ADDRESS} --args 'string:Hello' 'string:World!' 'address:{ACCOUNT_ADDRESS}'
+rooch move run --function {ACCOUNT_ADDRESS}::article_aggregate::create --sender-account {ACCOUNT_ADDRESS} --args 'string:Hello' 'string:World!''
 ```
 
 然后你可以更换一下 `--args` 后面的第一个参数（`title`）和第二个参数（`body`）的内容，多创建几篇文章。第三个参数表示文章的 Owner，只有 Owner 才能对文章进行更新和删除操作。
@@ -327,7 +295,7 @@ rooch object --id {ARTICLE_OBJECT_ID}
 可以这样提交一个交易，更新文章：
 
 ```shell
-rooch move run --function {ACCOUNT_ADDRESS}::article_aggregate::update --sender-account {ACCOUNT_ADDRESS} --args 'object_id:{ARTICLE_OBJECT_ID}' 'string:Foo' 'string:Bar' 'address:{ACCOUNT_ADDRESS}'
+rooch move run --function {ACCOUNT_ADDRESS}::article_aggregate::update --sender-account {ACCOUNT_ADDRESS} --args 'object_id:{ARTICLE_OBJECT_ID}' 'string:Foo' 'string:Bar''
 ```
 
 除了使用 Rooch CLI，你还可以通过调用 JSON RPC 来查询对象的状态：
@@ -573,6 +541,43 @@ curl 'http://localhost:1023/api/Articles?title=Hello'
 ```shell
 curl 'http://localhost:1023/api/Articles/{ARTICLE_OBJECT_ID}'
 ```
+
+## 改进应用
+
+### 实现自定义业务逻辑（在必要时）
+
+在上面的过程中，`MOVE_CRUD_IT` 预处理器已经为我们生成了完整的 CRUD 方法。如果 CRUD 是你需要的所有业务逻辑，那么你不需要再写一行代码。
+
+有可能你觉得默认生成的 CRUD 逻辑不符合你的需求，比如，你可能想要添加评论时不需要传递 `Owner` 参数给 `entry fun add_comment`，而是直接使用发送者的账户地址作为 Owner，那么这个需求目前可以这样满足：
+
+首先，在模型文件中像这样自定义一个方法：
+
+```yaml
+aggregates:
+  Article:
+    # ...
+    methods:
+      AddComment:
+        event:
+          name: CommentAdded
+          properties:
+            Owner:
+              type: address
+        parameters:
+          CommentSeqId:
+            type: u64
+          Commenter:
+            type: String
+          Body:
+            type: String
+```
+
+注意，上面的方法参数列表中已经没有 `Owner` 参数。
+
+然后，删除 `article_add_comment_logic.move` 文件，再次运行 dddappp 工具。（注意，因为工具默认不会覆盖已经存在的 `*_logic.move` 文件，所以你需要手动删除它。）
+
+打开重新生成的 `article_add_comment_logic.move` 文件中，找到 `verify` 函数，在函数体中填充你想要的业务逻辑代码。
+
 
 ## 其他
 

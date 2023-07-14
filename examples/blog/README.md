@@ -42,7 +42,7 @@ Create a plain text file in the `dddml` directory, named `blog.yaml`, with the f
 aggregates:
   Article:
     metadata:
-      Preprocessors: ["MOVE_CRUD_IT"]
+      Preprocessors: [ "MOVE_CRUD_IT" ]
     id:
       name: Id
       type: ObjectID
@@ -56,11 +56,10 @@ aggregates:
         length: 2000
       Comments:
         itemType: Comment
-
     entities:
       Comment:
         metadata:
-          Preprocessors: ["MOVE_CRUD_IT"]
+          Preprocessors: [ "MOVE_CRUD_IT" ]
         id:
           name: CommentSeqId
           type: u64
@@ -71,6 +70,8 @@ aggregates:
           Body:
             type: String
             length: 500
+          Owner:
+            type: address
 ```
 
 The meaning of this DDDML model should be very clear to developers, but we will still explain it briefly below.
@@ -194,41 +195,9 @@ Now open them and remove those redundant `use` statements. If your IDE has some 
 
 Then use `rooch move build` command to recompile Move project. Now there should be no warning messages.
 
-### Implementing Custom Business Logic (when necessary)
+Now you can start testing this app.
 
-In this example, the `MOVE_CRUD_IT` preprocessor already generates the full CRUD methods for us. If CRUD is all the business logic you need, then you don't have to write another line of code.
-
-It is possible that you feel that the default generated CRUD logic does not meet your needs, for example, you may want to add comment without passing the `Owner` argument to `entry fun add_comment` and directly use the sender account address as the owner, then this requirement can currently be satisfied as follows.
-
-First, define a custom method in the model file like this:
-
-```yaml
-aggregates:
-  Article:
-    # ...
-    methods:
-      AddComment:
-        event:
-          name: CommentAdded
-          properties:
-            Owner:
-              type: address
-        parameters:
-          CommentSeqId:
-            type: u64
-          Commenter:
-            type: String
-          Body:
-            type: String
-```
-
-Note that the `Owner` parameter is no longer present in the method parameters above.
-
-Then, delete `article_add_comment_logic.move`, run the dddappp tool again. (Note that since the tool does not overwrite the already existing `*_logic.move` file by default, you will need to delete it manually.)
-
-Open the regenerated `article_add_comment_logic.move` file, find the `verify` function, fill the function body with the business logic code you want.
-
-## Test Application
+## Test the Application
 
 ### Run Rooch Server and Publish Contracts
 
@@ -269,19 +238,19 @@ Use `rooch move run` command to submit a transaction and initialize the contract
 rooch move run --function {ACCOUNT_ADDRESS}::rooch_blog_demo_init::initialize --sender-account {ACCOUNT_ADDRESS}
 ```
 
-#### CRUD Article
+#### CRUD Articles
 
-##### Create Article
+##### Create Articles
 
 You can use Rooch CLI to submit a transaction like this to create a test article:
 
 ```shell
-rooch move run --function {ACCOUNT_ADDRESS}::article_aggregate::create --sender-account {ACCOUNT_ADDRESS} --args 'string:Hello' 'string:World!' 'address:{ACCOUNT_ADDRESS}'
+rooch move run --function {ACCOUNT_ADDRESS}::article_aggregate::create --sender-account {ACCOUNT_ADDRESS} --args 'string:Hello' 'string:World!''
 ```
 
 Then you can change the content of the first parameter (title) and the second parameter (body) after `--args`, and create a few more articles. The third argument indicates the owner of the article, only the owner can update and delete the article.
 
-##### READ Article
+##### READ Articles
 
 Now, you can query events and get the `ObjectID` of the created article:
 
@@ -321,12 +290,12 @@ Then, you can use Rooch CLI to query the object state (note to replace the place
 rooch object --id {ARTICLE_OBJECT_ID}
 ```
 
-##### Update Article
+##### Update Articles
 
 You can submit a transaction like this to update an article:
 
 ```shell
-rooch move run --function {ACCOUNT_ADDRESS}::article_aggregate::update --sender-account {ACCOUNT_ADDRESS} --args 'object_id:{ARTICLE_OBJECT_ID}' 'string:Foo' 'string:Bar' 'address:{ACCOUNT_ADDRESS}'
+rooch move run --function {ACCOUNT_ADDRESS}::article_aggregate::update --sender-account {ACCOUNT_ADDRESS} --args 'object_id:{ARTICLE_OBJECT_ID}' 'string:Foo' 'string:Bar''
 ```
 
 In addition to using Rooch CLI, you can also query the object state by calling JSON RPC:
@@ -342,7 +311,7 @@ curl --location --request POST 'http://127.0.0.1:50051/' \
 }'
 ```
 
-##### Delete Article
+##### Delete Articles
 
 You can submit a transaction like this to delete an article:
 
@@ -350,9 +319,9 @@ You can submit a transaction like this to delete an article:
 rooch move run --function {ACCOUNT_ADDRESS}::article_aggregate::delete --sender-account {ACCOUNT_ADDRESS} --args 'object_id:{ARTICLE_OBJECT_ID}'
 ```
 
-#### CRUD Comment
+#### CRUD Comments
 
-##### Add Comment
+##### Add Comments
 
 Let's get the ObjectID of another article (note the path parameter `.result.data[1]` in the `jq` command below, we intend to get the information of the "second" ArticleCreated event):
 
@@ -379,7 +348,7 @@ We can add a few more comments to this article by executing commands like this (
 rooch move run --function {ACCOUNT_ADDRESS}::article_aggregate::add_comment --sender-account {ACCOUNT_ADDRESS} --args 'object_id:{ARTICLE_OBJECT_ID}' 'u64:2' 'string:Anonymous2' 'string:"A test comment2"' 'address:{ACCOUNT_ADDRESS}'
 ```
 
-##### Read Comment
+##### Read Comments
 
 In our contract code, when a comment is added to an article, a `CommentTableItemAdded` event is emitted, which contains the ObjectID of the current article and the key (i.e. `comment_seq_id`) added to its comment table.
 
@@ -432,7 +401,7 @@ Note that in the above command, the table key in the path parameter (the part af
 
 For example, the BCS serialization result of a `u64` integer value `1`, represented as a hexadecimal string, is `0x0100000000000000`.
 
-##### Update Comment
+##### Update Comments
 
 We can submit a transaction like this to update a comment:
 
@@ -453,7 +422,7 @@ curl --location --request POST 'http://127.0.0.1:50051/' \
 }'
 ```
 
-##### Remove Comment
+##### Remove Comments
 
 Submit a transaction to remove a comment:
 
@@ -571,6 +540,44 @@ You can access information about a single article like this:
 ```shell
 curl 'http://localhost:1023/api/Articles/{ARTICLE_OBJECT_ID}'
 ```
+
+## Improve the Application
+
+
+### Implementing Custom Business Logic (when necessary)
+
+In the above process, the `MOVE_CRUD_IT` preprocessor already generates the full CRUD methods for us. If CRUD is all the business logic you need, then you don't have to write another line of code.
+
+It is possible that you feel that the default generated CRUD logic does not meet your needs, for example, you may want to add comment without passing the `Owner` argument to `entry fun add_comment` and directly use the sender account address as the owner, then this requirement can currently be satisfied as follows.
+
+First, define a custom method in the model file like this:
+
+```yaml
+aggregates:
+  Article:
+    # ...
+    methods:
+      AddComment:
+        event:
+          name: CommentAdded
+          properties:
+            Owner:
+              type: address
+        parameters:
+          CommentSeqId:
+            type: u64
+          Commenter:
+            type: String
+          Body:
+            type: String
+```
+
+Note that the `Owner` parameter is no longer present in the method parameters above.
+
+Then, delete `article_add_comment_logic.move`, run the dddappp tool again. (Note that since the tool does not overwrite the already existing `*_logic.move` file by default, you will need to delete it manually.)
+
+Open the regenerated `article_add_comment_logic.move` file, find the `verify` function, fill the function body with the business logic code you want.
+
 
 ## Other
 
