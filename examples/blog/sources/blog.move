@@ -11,6 +11,8 @@ module rooch_examples::blog {
     use std::error;
     use std::signer;
     use std::string::String;
+    friend rooch_examples::blog_add_article_logic;
+    friend rooch_examples::blog_remove_article_logic;
     friend rooch_examples::blog_create_logic;
     friend rooch_examples::blog_update_logic;
     friend rooch_examples::blog_delete_logic;
@@ -56,6 +58,44 @@ module rooch_examples::blog {
             version: 0,
             name,
             articles,
+        }
+    }
+
+    struct ArticleAddedToBlog has key {
+        version: u64,
+        article_id: ObjectID,
+    }
+
+    public fun article_added_to_blog_article_id(article_added_to_blog: &ArticleAddedToBlog): ObjectID {
+        article_added_to_blog.article_id
+    }
+
+    public(friend) fun new_article_added_to_blog(
+        blog: &Blog,
+        article_id: ObjectID,
+    ): ArticleAddedToBlog {
+        ArticleAddedToBlog {
+            version: version(blog),
+            article_id,
+        }
+    }
+
+    struct ArticleRemovedFromBlog has key {
+        version: u64,
+        article_id: ObjectID,
+    }
+
+    public fun article_removed_from_blog_article_id(article_removed_from_blog: &ArticleRemovedFromBlog): ObjectID {
+        article_removed_from_blog.article_id
+    }
+
+    public(friend) fun new_article_removed_from_blog(
+        blog: &Blog,
+        article_id: ObjectID,
+    ): ArticleRemovedFromBlog {
+        ArticleRemovedFromBlog {
+            version: version(blog),
+            article_id,
         }
     }
 
@@ -155,6 +195,14 @@ module rooch_examples::blog {
 
     public fun borrow_blog(storage_ctx: &mut StorageContext): &Blog {
         account_storage::global_borrow<Blog>(storage_ctx, @rooch_examples)
+    }
+
+    public(friend) fun emit_article_added_to_blog(storage_ctx: &mut StorageContext, article_added_to_blog: ArticleAddedToBlog) {
+        event::emit_event(storage_ctx, article_added_to_blog);
+    }
+
+    public(friend) fun emit_article_removed_from_blog(storage_ctx: &mut StorageContext, article_removed_from_blog: ArticleRemovedFromBlog) {
+        event::emit_event(storage_ctx, article_removed_from_blog);
     }
 
     public(friend) fun emit_blog_created(storage_ctx: &mut StorageContext, blog_created: BlogCreated) {

@@ -4,6 +4,7 @@ module rooch_examples::article_create_logic {
     use rooch_examples::article;
     use rooch_examples::article_created;
     use std::string::String;
+    use rooch_examples::blog_aggregate;
 
     friend rooch_examples::article_aggregate;
 
@@ -28,11 +29,15 @@ module rooch_examples::article_create_logic {
     ): Object<article::Article> {
         let title = article_created::title(article_created);
         let body = article_created::body(article_created);
-        article::create_article(
+        let article_obj = article::create_article(
             storage_ctx,
             title,
             body,
-        )
+        );
+        // ///////////////////////////
+        blog_aggregate::add_article(storage_ctx, _account, article::id(&article_obj));
+        // ///////////////////////////
+        article_obj
     }
 
 }

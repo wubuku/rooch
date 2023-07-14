@@ -7,10 +7,58 @@ module rooch_examples::blog_aggregate {
     use moveos_std::object_id::ObjectID;
     use moveos_std::storage_context::StorageContext;
     use rooch_examples::blog;
+    use rooch_examples::blog_add_article_logic;
     use rooch_examples::blog_create_logic;
     use rooch_examples::blog_delete_logic;
+    use rooch_examples::blog_remove_article_logic;
     use rooch_examples::blog_update_logic;
     use std::string::String;
+
+    public entry fun add_article(
+        storage_ctx: &mut StorageContext,
+        account: &signer,
+        article_id: ObjectID,
+    ) {
+        let blog = blog::remove_blog(storage_ctx);
+        let article_added_to_blog = blog_add_article_logic::verify(
+            storage_ctx,
+            account,
+            article_id,
+            &blog,
+        );
+        let updated_blog = blog_add_article_logic::mutate(
+            storage_ctx,
+            account,
+            &article_added_to_blog,
+            blog,
+        );
+        blog::update_version_and_add(storage_ctx, account, updated_blog);
+        blog::emit_article_added_to_blog(storage_ctx, article_added_to_blog);
+    }
+
+
+    public entry fun remove_article(
+        storage_ctx: &mut StorageContext,
+        account: &signer,
+        article_id: ObjectID,
+    ) {
+        let blog = blog::remove_blog(storage_ctx);
+        let article_removed_from_blog = blog_remove_article_logic::verify(
+            storage_ctx,
+            account,
+            article_id,
+            &blog,
+        );
+        let updated_blog = blog_remove_article_logic::mutate(
+            storage_ctx,
+            account,
+            &article_removed_from_blog,
+            blog,
+        );
+        blog::update_version_and_add(storage_ctx, account, updated_blog);
+        blog::emit_article_removed_from_blog(storage_ctx, article_removed_from_blog);
+    }
+
 
     public entry fun create(
         storage_ctx: &mut StorageContext,

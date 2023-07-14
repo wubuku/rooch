@@ -83,16 +83,16 @@ singletonObjects:
         length: 200
       Articles:
         itemType: ObjectID
-#    methods:
-#      AddArticle:
-#        event:
-#          name: ArticleAddedToBlog
-#        parameters:
-#          ArticleId:
-#            type: ObjectID
-#      RemoveArticle:
-#        event:
-#          name: ArticleRemovedFromBlog
-#        parameters:
-#          ArticleId:
-#            type: ObjectID
+    methods:
+      AddArticle:
+        event:
+          name: ArticleAddedToBlog
+        parameters:
+          ArticleId:
+            type: ObjectID
+      RemoveArticle:
+        event:
+          name: ArticleRemovedFromBlog
+        parameters:
+          ArticleId:
+            type: ObjectID

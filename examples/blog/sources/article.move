@@ -77,6 +77,7 @@ module rooch_examples::article {
 
     public(friend) fun add_comment(storage_ctx: &mut StorageContext, article_obj: &mut Object<Article>, comment: Comment) {
         let comment_seq_id = comment::comment_seq_id(&comment);
+        assert!(!table::contains(&object::borrow_mut(article_obj).comments, comment_seq_id), EID_ALREADY_EXISTS);
         table::add(&mut object::borrow_mut(article_obj).comments, comment_seq_id, comment);
         event::emit_event(storage_ctx, CommentTableItemAdded {
             article_id: id(article_obj),
@@ -85,6 +86,7 @@ module rooch_examples::article {
     }
 
     public(friend) fun remove_comment(article_obj: &mut Object<Article>, comment_seq_id: u64) {
+        assert!(table::contains(&object::borrow_mut(article_obj).comments, comment_seq_id), EID_NOT_FOUND);
         let comment = table::remove(&mut object::borrow_mut(article_obj).comments, comment_seq_id);
         comment::drop_comment(comment);
     }

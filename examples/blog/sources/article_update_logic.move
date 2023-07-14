@@ -1,11 +1,15 @@
 module rooch_examples::article_update_logic {
+    use std::signer;
     use moveos_std::object::Object;
     use moveos_std::storage_context::StorageContext;
     use rooch_examples::article;
     use rooch_examples::article_updated;
     use std::string::String;
+    use moveos_std::object;
 
     friend rooch_examples::article_aggregate;
+
+    const ENOT_OWNER_ACCOUNT: u64 = 113;
 
     public(friend) fun verify(
         storage_ctx: &mut StorageContext,
@@ -16,6 +20,7 @@ module rooch_examples::article_update_logic {
     ): article::ArticleUpdated {
         let _ = storage_ctx;
         let _ = account;
+        assert!(signer::address_of(account) == object::owner(article_obj), ENOT_OWNER_ACCOUNT);
         article::new_article_updated(
             article_obj,
             title,

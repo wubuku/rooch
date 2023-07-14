@@ -2,6 +2,7 @@ module rooch_examples::article_delete_logic {
     use moveos_std::object::Object;
     use moveos_std::storage_context::StorageContext;
     use rooch_examples::article;
+    use rooch_examples::blog_aggregate;
 
     friend rooch_examples::article_aggregate;
 
@@ -27,6 +28,9 @@ module rooch_examples::article_delete_logic {
         let _ = storage_ctx;
         let _ = id;
         let _ = article_deleted;
+        // ///////////////////////////
+        blog_aggregate::remove_article(storage_ctx, _account, article::id(&article_obj));
+        // ///////////////////////////
         article_obj
     }
 
