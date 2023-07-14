@@ -543,10 +543,13 @@ curl 'http://localhost:1023/api/Articles/{ARTICLE_OBJECT_ID}'
 
 ## Improve the Application
 
-
-### Implementing Custom Business Logic (when necessary)
-
 In the above process, the `MOVE_CRUD_IT` preprocessor already generates the full CRUD methods for us. If CRUD is all the business logic you need, then you don't have to write another line of code.
+
+Of course, when developing a real application, things are often not so simple. Let's move on to explore how we can improve the above example in several points to bring it closer to "actual business requirements".
+
+The final modified model file and Move contract code have been uploaded to this code base. The model file is available at [dddml/blog.yaml](./dddml/blog.yaml) and the code is in the [sources/](./sources/) directory.
+
+### Modify the AddComment Method
 
 It is possible that you feel that the default generated CRUD logic does not meet your needs, for example, you may want to add comment without passing the `Owner` argument to `entry fun add_comment` and directly use the sender account address as the owner, then this requirement can currently be satisfied as follows.
 
@@ -578,6 +581,144 @@ Then, delete `article_add_comment_logic.move`, run the dddappp tool again. (Note
 
 Open the regenerated `article_add_comment_logic.move` file, find the `verify` function, fill the function body with the business logic code you want.
 
+
+### Add a Singleton Object: Blog
+
+We intend to add a singleton object `Blog`, which has a property `Name`, and a property `Articles`, `Articles` being an array of `ObjectID`s representing the posts contained in the blog.
+
+In the `dddml/blog.yaml` file, add the definition of the singleton object:
+
+```yaml
+singletonObjects:
+  Blog:
+    metadata:
+      Preprocessors: [ "MOVE_CRUD_IT" ]
+    properties:
+      Name:
+        type: String
+        length: 200
+      Articles:
+        itemType: ObjectID
+    methods:
+      AddArticle:
+        event:
+          name: ArticleAddedToBlog
+        parameters:
+          ArticleId:
+            type: ObjectID
+      RemoveArticle:
+        event:
+          name: ArticleRemovedFromBlog
+        parameters:
+          ArticleId:
+            type: ObjectID
+```
+
+Run the dddappp tool again. Open the generated `blog_add_article_logic.move` and `blog_remove_article_logic.move` files and fill in the business logic code.
+
+### Modify the Logic of Creating Articles
+
+Open the file `article_create_logic.move`, find the `mutate` function, and modify its implementation so that it adds the newly created article to the `Articles` property of the `Blog` object.
+
+```
+    public(friend) fun mutate(
+        //...
+    ): Object<article::Article> {
+        let title = article_created::title(article_created);
+        let body = article_created::body(article_created);
+        let article_obj = article::create_article(
+            storage_ctx,
+            title,
+            body,
+        );
+        blog_aggregate::add_article(storage_ctx, _account, article::id(&article_obj));
+        article_obj
+    }
+```
+
+### Modify the Logic of Deleting Articles
+
+Open the file `article_delete_logic.move`, find the `mutate` function, and modify its implementation so that it removes the deleted article from the `Articles` property of the `Blog` object.
+
+```
+    public(friend) fun mutate(
+        //...
+    ): Object<article::Article> {
+        let _ = article_deleted;
+        blog_aggregate::remove_article(storage_ctx, _account, article::id(&article_obj));
+        article_obj
+    }
+```
+
+### Modify the Logic of Updating Articles
+
+Open the file `article_update_logic.move`, find the `verify` function and modify its implementation to check if the caller is the owner of the article.
+
+```
+    const ENOT_OWNER_ACCOUNT: u64 = 113;
+
+    public(friend) fun verify(
+        //...
+    ): article::ArticleUpdated {
+        let _ = storage_ctx;
+        assert!(signer::address_of(account) == object::owner(article_obj), ENOT_OWNER_ACCOUNT);
+        article::new_article_updated(
+            article_obj,
+            title,
+            body,
+        )
+    }
+```
+
+### Modify Logic of Removing Comments and Updating Comments
+
+Open the file `article_update_comment_logic.move`, find the `verify` function and modify its implementation to check if the caller is the owner of the comment.
+
+```
+    const ENOT_OWNER_ACCOUNT: u64 = 113;
+
+    public(friend) fun verify(
+        //...
+    ): article::CommentUpdated {
+        let _ = storage_ctx;
+        let comment = article::borrow_comment(article_obj, comment_seq_id);
+        assert!(std::signer::address_of(account) == comment::owner(comment), ENOT_OWNER_ACCOUNT);
+        article::new_comment_updated(
+            //...
+        )
+    }
+```
+
+Open the file `article_remove_comment_logic.move`, find the `verify` function and modify its implementation to check if the caller is the owner of the comment.
+
+```
+    const ENOT_OWNER_ACCOUNT: u64 = 113;
+
+    public(friend) fun verify(
+        //...
+    ): article::CommentRemoved {
+        let _ = storage_ctx;
+        let comment = article::borrow_comment(article_obj, comment_seq_id);
+        assert!(std::signer::address_of(account) == comment::owner(comment), 111);
+        article::new_comment_removed(
+            //...
+        )
+    }
+```
+
+### Testing the Improved Application
+
+After adding `Blog` as a singleton object, you need to initialize it before creating articles:
+
+```shell
+rooch move run --function {ARTICLE_OBJECT_ID}::blog_aggregate::create --sender-account {ARTICLE_OBJECT_ID} --args 'string:My Blog' 'vector<object_id>:{ARTICLE_OBJECT_ID}'
+```
+
+Also, you no longer need to pass in the `Owner` argument when adding a comment:
+
+```shell
+rooch move run --function {ACCOUNT_ADDRESS}::article_aggregate::add_comment --sender-account {ACCOUNT_ADDRESS} --args 'object_id:{ARTICLE_OBJECT_ID}' 'u64:1' 'string:Anonymous' 'string:"A test comment"'
+```
 
 ## Other
 

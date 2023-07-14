@@ -19,7 +19,6 @@ module rooch_examples::article_update_logic {
         article_obj: &Object<article::Article>,
     ): article::ArticleUpdated {
         let _ = storage_ctx;
-        let _ = account;
         assert!(signer::address_of(account) == object::owner(article_obj), ENOT_OWNER_ACCOUNT);
         article::new_article_updated(
             article_obj,

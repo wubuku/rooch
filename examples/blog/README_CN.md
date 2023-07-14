@@ -544,9 +544,13 @@ curl 'http://localhost:1023/api/Articles/{ARTICLE_OBJECT_ID}'
 
 ## 改进应用
 
-### 实现自定义业务逻辑（在必要时）
-
 在上面的过程中，`MOVE_CRUD_IT` 预处理器已经为我们生成了完整的 CRUD 方法。如果 CRUD 是你需要的所有业务逻辑，那么你不需要再写一行代码。
+
+当然，在开发一个真实的应用时，事情往往不会这么简单。下面我们接着探讨一下，如何从几个方面改进上面的例子，使它更接近“实际的业务需求”。
+
+最终修改后的模型文件和 Move 合约代码，已经上传到了本代码库。模型文件见 [dddml/blog.yaml](./dddml/blog.yaml)，代码见 [sources/](./sources/) 目录。
+
+### 修改添加评论的方法
 
 有可能你觉得默认生成的 CRUD 逻辑不符合你的需求，比如，你可能想要添加评论时不需要传递 `Owner` 参数给 `entry fun add_comment`，而是直接使用发送者的账户地址作为 Owner，那么这个需求目前可以这样满足：
 
@@ -578,6 +582,143 @@ aggregates:
 
 打开重新生成的 `article_add_comment_logic.move` 文件中，找到 `verify` 函数，在函数体中填充你想要的业务逻辑代码。
 
+### 增加一个单例对象 Blog
+
+我们打算增加一个（只有一个实例的）单例对象 Blog，它有一个属性 `Name`，和一个属性 `Articles`，`Articles` 是一个 `ObjectID` 的数组，表示博客中包含的文章。
+
+在 `dddml/blog.yaml` 文件中，增加一个单例对象的定义：
+
+```yaml
+singletonObjects:
+  Blog:
+    metadata:
+      Preprocessors: [ "MOVE_CRUD_IT" ]
+    properties:
+      Name:
+        type: String
+        length: 200
+      Articles:
+        itemType: ObjectID
+    methods:
+      AddArticle:
+        event:
+          name: ArticleAddedToBlog
+        parameters:
+          ArticleId:
+            type: ObjectID
+      RemoveArticle:
+        event:
+          name: ArticleRemovedFromBlog
+        parameters:
+          ArticleId:
+            type: ObjectID
+```
+
+再次运行 dddappp 工具。打开生成的 `blog_add_article_logic.move` 和 `blog_remove_article_logic.move` 文件，填充业务逻辑代码。
+
+### 修改创建文章的逻辑
+
+打开文件 `article_create_logic.move`，找到 `mutate` 函数，修改它的实现，使它能够把新创建的文章添加到 Blog 对象的 `Articles` 属性中。
+
+```
+    public(friend) fun mutate(
+        //...
+    ): Object<article::Article> {
+        let title = article_created::title(article_created);
+        let body = article_created::body(article_created);
+        let article_obj = article::create_article(
+            storage_ctx,
+            title,
+            body,
+        );
+        blog_aggregate::add_article(storage_ctx, _account, article::id(&article_obj));
+        article_obj
+    }
+```
+
+### 修改删除文章的逻辑
+
+打开文件 `article_delete_logic.move`，找到 `mutate` 函数，修改它的实现，使它能够把被删除的文章从 Blog 对象的 `Articles` 属性中移除。
+
+```
+    public(friend) fun mutate(
+        //...
+    ): Object<article::Article> {
+        let _ = article_deleted;
+        blog_aggregate::remove_article(storage_ctx, _account, article::id(&article_obj));
+        article_obj
+    }
+```
+
+### 修改更新文章的逻辑
+
+打开文件 `article_update_logic.move`，找到 `verify` 函数，修改它的实现，检查调用者是否是文章的所有者。
+
+```
+    const ENOT_OWNER_ACCOUNT: u64 = 113;
+
+    public(friend) fun verify(
+        //...
+    ): article::ArticleUpdated {
+        let _ = storage_ctx;
+        assert!(signer::address_of(account) == object::owner(article_obj), ENOT_OWNER_ACCOUNT);
+        article::new_article_updated(
+            article_obj,
+            title,
+            body,
+        )
+    }
+```
+
+### 修改移除评论和更新评论的逻辑
+
+打开文件 `article_update_comment_logic.move`，找到 `verify` 函数，修改它的实现，检查调用者是否是评论的所有者。
+
+```
+    const ENOT_OWNER_ACCOUNT: u64 = 113;
+
+    public(friend) fun verify(
+        //...
+    ): article::CommentUpdated {
+        let _ = storage_ctx;
+        let comment = article::borrow_comment(article_obj, comment_seq_id);
+        assert!(std::signer::address_of(account) == comment::owner(comment), ENOT_OWNER_ACCOUNT);
+        article::new_comment_updated(
+            //...
+        )
+    }
+```
+
+打开文件 `article_remove_comment_logic.move`，找到 `verify` 函数，修改它的实现，检查调用者是否是评论的所有者。
+
+```
+    const ENOT_OWNER_ACCOUNT: u64 = 113;
+
+    public(friend) fun verify(
+        //...
+    ): article::CommentRemoved {
+        let _ = storage_ctx;
+        let comment = article::borrow_comment(article_obj, comment_seq_id);
+        assert!(std::signer::address_of(account) == comment::owner(comment), 111);
+        article::new_comment_removed(
+            //...
+        )
+    }
+```
+
+### 测试改进后的应用
+
+在增加了 Blog 这个单例对象后，在添加文章之前，需要先将它初始化：
+
+```shell
+rooch move run --function {ARTICLE_OBJECT_ID}::blog_aggregate::create --sender-account {ARTICLE_OBJECT_ID} --args 'string:My Blog' 'vector<object_id>:{ARTICLE_OBJECT_ID}'
+```
+
+另外，添加评论时不再需要传入 `Owner` 参数：
+
+```shell
+rooch move run --function {ACCOUNT_ADDRESS}::article_aggregate::add_comment --sender-account {ACCOUNT_ADDRESS} --args 'object_id:{ARTICLE_OBJECT_ID}' 'u64:1' 'string:Anonymous' 'string:"A test comment"'
+```
 
 ## 其他
 

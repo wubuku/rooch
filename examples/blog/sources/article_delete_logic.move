@@ -24,13 +24,8 @@ module rooch_examples::article_delete_logic {
         article_deleted: &article::ArticleDeleted,
         article_obj: Object<article::Article>,
     ): Object<article::Article> {
-        let id = article::id(&article_obj);
-        let _ = storage_ctx;
-        let _ = id;
         let _ = article_deleted;
-        // ///////////////////////////
         blog_aggregate::remove_article(storage_ctx, _account, article::id(&article_obj));
-        // ///////////////////////////
         article_obj
     }
 
