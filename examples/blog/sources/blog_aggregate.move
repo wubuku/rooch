@@ -60,11 +60,13 @@ module rooch_examples::blog_aggregate {
         articles: vector<ObjectID>,
     ) {
         let blog_created = blog_create_logic::verify(
+            storage_ctx,
             account,
             name,
             articles,
         );
         let blog = blog_create_logic::mutate(
+            storage_ctx,
             account,
             &blog_created,
         );
@@ -80,12 +82,14 @@ module rooch_examples::blog_aggregate {
     ) {
         let blog = blog::remove_blog(storage_ctx);
         let blog_updated = blog_update_logic::verify(
+            storage_ctx,
             account,
             name,
             articles,
             &blog,
         );
         let updated_blog = blog_update_logic::mutate(
+            storage_ctx,
             account,
             &blog_updated,
             blog,
@@ -100,10 +104,12 @@ module rooch_examples::blog_aggregate {
     ) {
         let blog = blog::remove_blog(storage_ctx);
         let blog_deleted = blog_delete_logic::verify(
+            storage_ctx,
             account,
             &blog,
         );
         let updated_blog = blog_delete_logic::mutate(
+            storage_ctx,
             account,
             &blog_deleted,
             blog,
