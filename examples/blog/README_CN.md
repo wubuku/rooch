@@ -614,7 +614,62 @@ singletonObjects:
             type: ObjectID
 ```
 
-再次运行 dddappp 工具。打开生成的 `blog_add_article_logic.move` 和 `blog_remove_article_logic.move` 文件，填充业务逻辑代码。
+再次运行 dddappp 工具。
+
+打开生成的 `blog_add_article_logic.move` 文件，填充业务逻辑代码：
+
+```
+    public(friend) fun verify(
+        _storage_ctx: &mut StorageContext, _account: &signer,
+        article_id: ObjectID, blog: &blog::Blog,
+    ): blog::ArticleAddedToBlog {
+        blog::new_article_added_to_blog(
+            blog, article_id,
+        )
+    }
+
+    public(friend) fun mutate(
+        _storage_ctx: &mut StorageContext, _account: &signer,
+        article_added_to_blog: &blog::ArticleAddedToBlog,
+        blog: blog::Blog,
+    ): blog::Blog {
+        let article_id = article_added_to_blog::article_id(article_added_to_blog);
+        let articles = blog::articles(&blog);
+        if (!vector::contains(&articles, &article_id)) {
+            vector::push_back(&mut articles, article_id);
+            blog::set_articles(&mut blog, articles);
+        };
+        blog
+    }
+```
+
+打开生成的 `blog_remove_article_logic.move` 文件，填充业务逻辑代码：
+
+```
+    public(friend) fun verify(
+        _storage_ctx: &mut StorageContext, _account: &signer,
+        article_id: ObjectID, blog: &blog::Blog,
+    ): blog::ArticleRemovedFromBlog {
+        blog::new_article_removed_from_blog(
+            blog, article_id,
+        )
+    }
+
+    public(friend) fun mutate(
+        _storage_ctx: &mut StorageContext, _account: &signer,
+        article_removed_from_blog: &blog::ArticleRemovedFromBlog,
+        blog: blog::Blog,
+    ): blog::Blog {
+        let article_id = article_removed_from_blog::article_id(article_removed_from_blog);
+        let articles = blog::articles(&blog);
+        let (found, idx) = vector::index_of(&articles, &article_id);
+        if (found) {
+            vector::remove(&mut articles, idx);
+            blog::set_articles(&mut blog, articles);
+        };
+        blog
+    }
+```
 
 ### 修改创建文章的逻辑
 
@@ -711,7 +766,7 @@ singletonObjects:
 在增加了 Blog 这个单例对象后，在添加文章之前，需要先将它初始化：
 
 ```shell
-rooch move run --function {ACCOUNT_ADDRESS}::blog_aggregate::create --sender-account {ACCOUNT_ADDRESS} --args 'string:My Blog' 'vector<object_id>:{ACCOUNT_ADDRESS}'
+rooch move run --function {ACCOUNT_ADDRESS}::blog_aggregate::create --sender-account {ACCOUNT_ADDRESS} --args 'string:My Blog' 'vector<object_id>:'
 ```
 
 另外，添加评论时不再需要传入 `Owner` 参数：

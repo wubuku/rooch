@@ -614,7 +614,62 @@ singletonObjects:
             type: ObjectID
 ```
 
-Run the dddappp tool again. Open the generated `blog_add_article_logic.move` and `blog_remove_article_logic.move` files and fill in the business logic code.
+Run the dddappp tool again.
+
+Open the generated file `blog_add_article_logic.move` and fill in the business logic code:
+
+```
+    public(friend) fun verify(
+        _storage_ctx: &mut StorageContext, _account: &signer,
+        article_id: ObjectID, blog: &blog::Blog,
+    ): blog::ArticleAddedToBlog {
+        blog::new_article_added_to_blog(
+            blog, article_id,
+        )
+    }
+
+    public(friend) fun mutate(
+        _storage_ctx: &mut StorageContext, _account: &signer,
+        article_added_to_blog: &blog::ArticleAddedToBlog,
+        blog: blog::Blog,
+    ): blog::Blog {
+        let article_id = article_added_to_blog::article_id(article_added_to_blog);
+        let articles = blog::articles(&blog);
+        if (!vector::contains(&articles, &article_id)) {
+            vector::push_back(&mut articles, article_id);
+            blog::set_articles(&mut blog, articles);
+        };
+        blog
+    }
+```
+
+Open the generated file `blog_remove_article_logic.move` and fill in the business logic code:
+
+```
+    public(friend) fun verify(
+        _storage_ctx: &mut StorageContext, _account: &signer,
+        article_id: ObjectID, blog: &blog::Blog,
+    ): blog::ArticleRemovedFromBlog {
+        blog::new_article_removed_from_blog(
+            blog, article_id,
+        )
+    }
+
+    public(friend) fun mutate(
+        _storage_ctx: &mut StorageContext, _account: &signer,
+        article_removed_from_blog: &blog::ArticleRemovedFromBlog,
+        blog: blog::Blog,
+    ): blog::Blog {
+        let article_id = article_removed_from_blog::article_id(article_removed_from_blog);
+        let articles = blog::articles(&blog);
+        let (found, idx) = vector::index_of(&articles, &article_id);
+        if (found) {
+            vector::remove(&mut articles, idx);
+            blog::set_articles(&mut blog, articles);
+        };
+        blog
+    }
+```
 
 ### Modify the Logic of Creating Articles
 
@@ -711,7 +766,7 @@ Open the file `article_remove_comment_logic.move`, find the `verify` function an
 After adding `Blog` as a singleton object, you need to initialize it before creating articles:
 
 ```shell
-rooch move run --function {ACCOUNT_ADDRESS}::blog_aggregate::create --sender-account {ACCOUNT_ADDRESS} --args 'string:My Blog' 'vector<object_id>:{ACCOUNT_ADDRESS}'
+rooch move run --function {ACCOUNT_ADDRESS}::blog_aggregate::create --sender-account {ACCOUNT_ADDRESS} --args 'string:My Blog' 'vector<object_id>:'
 ```
 
 Also, you no longer need to pass in the `Owner` argument when adding a comment:
