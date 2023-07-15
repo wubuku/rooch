@@ -769,6 +769,14 @@ singletonObjects:
 rooch move run --function {ACCOUNT_ADDRESS}::blog_aggregate::create --sender-account {ACCOUNT_ADDRESS} --args 'string:My Blog' 'vector<object_id>:'
 ```
 
+在添加文章之后，你可以这样查询 Blog 的状态：
+
+```shell
+rooch state --access-path /resource/{ACCOUNT_ADDRESS}/{ACCOUNT_ADDRESS}::blog::Blog
+```
+
+在返回的结果中，应该可以看到博客文章的 `ObjectID` 的列表。
+
 另外，添加评论时不再需要传入 `Owner` 参数：
 
 ```shell

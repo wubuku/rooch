@@ -769,6 +769,14 @@ After adding `Blog` as a singleton object, you need to initialize it before crea
 rooch move run --function {ACCOUNT_ADDRESS}::blog_aggregate::create --sender-account {ACCOUNT_ADDRESS} --args 'string:My Blog' 'vector<object_id>:'
 ```
 
+After adding an article, you can query the state of the `Blog` like this:
+
+```shell
+rooch state --access-path /resource/{ACCOUNT_ADDRESS}/{ACCOUNT_ADDRESS}::blog::Blog
+```
+
+In the returned result, you should see a list of `ObjectID`s of the blog articles.
+
 Also, you no longer need to pass in the `Owner` argument when adding a comment:
 
 ```shell
