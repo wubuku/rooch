@@ -851,6 +851,19 @@ Locate the definition of the `Comment` entity in the model file and add a few li
             structName: CommentSeqIdGenerator
 ```
 
+Then, remove or comment out the definition of the `CommentSeqId` parameter in the `AddComment` method, as suggested in the comment below:
+
+```yaml
+      AddComment:
+        # ...
+        parameters:
+          # Remove or comment out the following two lines
+          # CommentSeqId:
+          #   type: u64
+          Commenter:
+            type: String
+```
+
 ### Re-generate, Fill in Business Logic
 
 Delete the files `blog_add_article_logic.move`, `blog_remove_article_logic.move` and `article_add_comment_logic.move`. Re-run the dddappp tool to regenerate the code.

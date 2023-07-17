@@ -850,6 +850,19 @@ singletonObjects:
             structName: CommentSeqIdGenerator
 ```
 
+然后，按照下面注释的提示，移除或者注释掉 `AddComment` 方法中的 `CommentSeqId` 参数的定义：
+
+```yaml
+      AddComment:
+        # ...
+        parameters:
+          # 移除或者注释掉下面这两行代码
+          # CommentSeqId:
+          #   type: u64
+          Commenter:
+            type: String
+```
+
 ### 重新生成代码、填充业务逻辑
 
 删除 `blog_add_article_logic.move`，`blog_remove_article_logic.move` 和 `article_add_comment_logic.move` 这三个文件。重新运行 dddappp 工具重新生成代码。
