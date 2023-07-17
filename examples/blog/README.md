@@ -545,7 +545,19 @@ curl 'http://localhost:1023/api/Articles/{ARTICLE_OBJECT_ID}'
 
 In the above process, the `MOVE_CRUD_IT` preprocessor already generates the full CRUD methods for us. If CRUD is all the business logic you need, then you don't have to write another line of code.
 
-Of course, when developing a real application, things are often not so simple. Let's move on to explore how we can improve the above example in several points to bring it closer to "actual business requirements".
+Of course, when developing a real application, things are often not so simple. Let's move on to explore how we can improve the above example in several points to bring it closer to "actual business requirements". In fact, all you have to do is probably add a line of code like this at the end of the `verify` function:
+
+```
+    public(friend) fun verify(
+        // ...
+    ): article::CommentAdded {
+        // ...
+            body,
+            // Add the following line of code
+            std::signer::address_of(account),
+        )
+    }
+```
 
 ### Modify the AddComment Method
 

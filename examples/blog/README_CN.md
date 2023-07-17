@@ -578,7 +578,19 @@ aggregates:
 
 然后，删除 `article_add_comment_logic.move` 文件，再次运行 dddappp 工具。（注意，因为工具默认不会覆盖已经存在的 `*_logic.move` 文件，所以你需要手动删除它。）
 
-打开重新生成的 `article_add_comment_logic.move` 文件中，找到 `verify` 函数，在函数体中填充你想要的业务逻辑代码。
+打开重新生成的 `article_add_comment_logic.move` 文件中，找到 `verify` 函数，在函数体中填充你想要的业务逻辑代码。事实上你要做的可能只是在 `verify` 函数的最后添加这样一行代码：
+
+```
+    public(friend) fun verify(
+        // ...
+    ): article::CommentAdded {
+        // ...
+            body,
+            // 添加下面这行代码
+            std::signer::address_of(account),
+        )
+    }
+```
 
 ### 增加一个单例对象 Blog
 
