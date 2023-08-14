@@ -5,18 +5,21 @@ use crate::cli_types::{CommandAction, WalletContextOptions};
 use crate::utils::read_line;
 use async_trait::async_trait;
 use clap::Parser;
+use regex::Regex;
+use rooch_config::store_config::StoreConfig;
 use rooch_config::{rooch_config_dir, Config, ROOCH_CLIENT_CONFIG, ROOCH_KEYSTORE_FILENAME};
 use rooch_key::keystore::{AccountKeystore, FileBasedKeystore, Keystore};
 use rooch_rpc_client::client_config::{ClientConfig, Env};
+use rooch_types::error::RoochError;
 use rooch_types::{crypto::BuiltinScheme, error::RoochResult};
 use std::fs;
 
 /// Tool for init with rooch
 #[derive(Parser)]
 pub struct Init {
-    /// Accept defaults config, default true
-    #[clap(short = 'y', long = "yes", default_value_t = true)]
-    pub accept_defaults: bool,
+    /// Command line input of custom server URL
+    #[clap(short = 's', long = "server-url")]
+    pub server_url: Option<String>,
     #[clap(flatten)]
     pub context_options: WalletContextOptions,
 }
@@ -42,44 +45,41 @@ impl CommandAction<String> for Init {
                     ws: None,
                 }),
                 None => {
-                    if self.accept_defaults {
-                        println!("Creating config file [{:?}] with default (local) server and ed25519 key scheme.", client_config_path);
+                    println!(
+                        "Creating config file [{:?}] with server and ed25519 crypto scheme.",
+                        client_config_path
+                    );
+                    let url = if self.server_url.is_none() {
+                        String::new()
                     } else {
-                        print!(
-                                "Config file [{:?}] doesn't exist, do you want to connect to a rooch server [y/N]?",
-                                client_config_path
-                            );
-                    }
-                    if self.accept_defaults
-                        || matches!(read_line(), Ok(line) if line.trim().to_lowercase() == "y")
-                    {
-                        let url = if self.accept_defaults {
-                            String::new()
+                        let address_and_port_regex =
+                            Regex::new(r"^(https?://(?:\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|localhost):\d{1,5})$")
+                                .unwrap();
+                        let url = self.server_url.unwrap();
+                        print!("Rooch server URL: {:?} ", url);
+                        // Check if input matches the regex pattern
+                        if address_and_port_regex.is_match(&url) {
+                            url
                         } else {
-                            print!(
-                                "Rooch server URL (Defaults to Rooch Local if not specified) : "
-                            );
-                            read_line()?
+                            return Err(RoochError::CommandArgumentError("Invalid input format. Please provide a valid URL (e.g., http://0.0.0.0:50051).".to_owned()));
+                        }
+                    };
+                    Some(if url.trim().is_empty() {
+                        Env::default()
+                    } else {
+                        print!("Environment alias for [{url}] : ");
+                        let alias = read_line()?;
+                        let alias = if alias.trim().is_empty() {
+                            "custom".to_string()
+                        } else {
+                            alias
                         };
-                        Some(if url.trim().is_empty() {
-                            Env::default()
-                        } else {
-                            print!("Environment alias for [{url}] : ");
-                            let alias = read_line()?;
-                            let alias = if alias.trim().is_empty() {
-                                "custom".to_string()
-                            } else {
-                                alias
-                            };
-                            Env {
-                                alias,
-                                rpc: url,
-                                ws: None,
-                            }
-                        })
-                    } else {
-                        None
-                    }
+                        Env {
+                            alias,
+                            rpc: url,
+                            ws: None,
+                        }
+                    })
                 }
             };
 
@@ -89,14 +89,8 @@ impl CommandAction<String> for Init {
                     .unwrap_or(&rooch_config_dir()?)
                     .join(ROOCH_KEYSTORE_FILENAME);
                 let mut keystore = Keystore::from(FileBasedKeystore::new(&keystore_path)?);
-                let key_scheme = if self.accept_defaults {
-                    BuiltinScheme::Ed25519
-                } else {
-                    println!("Select key scheme to generate keypair (0 for ed25519, 1 for Ecdsa):");
-                    BuiltinScheme::from_flag(read_line()?.trim())?
-                };
                 let (new_address, phrase, scheme) =
-                    keystore.generate_and_add_new_key(key_scheme, None, None)?;
+                    keystore.generate_and_add_new_key(BuiltinScheme::Ed25519, None, None)?;
                 println!(
                     "Generated new keypair for address with scheme {:?} [{new_address}]",
                     scheme.to_string()
@@ -111,6 +105,10 @@ impl CommandAction<String> for Init {
                 }
                 .persisted(client_config_path.as_path())
                 .save()?;
+
+                //Store config init
+                StoreConfig::init()
+                    .map_err(|e| anyhow::anyhow!("Init stroe config failed:{}", e))?;
             }
 
             let message = format!(

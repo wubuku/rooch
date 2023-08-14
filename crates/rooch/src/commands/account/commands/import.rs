@@ -7,7 +7,7 @@ use std::fmt::Debug;
 use async_trait::async_trait;
 use rooch_key::keystore::AccountKeystore;
 use rooch_types::{
-    crypto::BuiltinScheme::Ed25519,
+    crypto::BuiltinScheme,
     error::{RoochError, RoochResult},
 };
 
@@ -16,8 +16,8 @@ use crate::cli_types::{CommandAction, WalletContextOptions};
 /// Add a new key to rooch.keystore based on the input mnemonic phrase
 #[derive(Debug, Parser)]
 pub struct ImportCommand {
+    #[clap(short = 'm', long = "mnemonic-phrase")]
     mnemonic_phrase: String,
-
     #[clap(flatten)]
     pub context_options: WalletContextOptions,
 }
@@ -32,10 +32,13 @@ impl CommandAction<()> for ImportCommand {
         let address = context
             .config
             .keystore
-            .import_from_mnemonic(&self.mnemonic_phrase, Ed25519, None)
+            .import_from_mnemonic(&self.mnemonic_phrase, BuiltinScheme::Ed25519, None)
             .map_err(|e| RoochError::ImportAccountError(e.to_string()))?;
 
-        println!("Key imported for address [{address}]");
+        println!(
+            "Key imported for address on scheme {:?}: [{address}]",
+            BuiltinScheme::Ed25519.to_owned()
+        );
 
         Ok(())
     }

@@ -1,7 +1,10 @@
 // Copyright (c) RoochNetwork
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::actor::messages::{GetTransactionInfosByTxHashMessage, GetTxSeqMappingByTxOrderMessage};
+use crate::actor::messages::{
+    GetTransactionInfosByTxHashMessage, GetTxSeqMappingByTxOrderMessage,
+    ListAnnotatedStatesMessage, ListStatesMessage,
+};
 use crate::actor::{
     executor::ExecutorActor,
     messages::{
@@ -79,6 +82,36 @@ impl ExecutorProxy {
     ) -> Result<Vec<Option<AnnotatedState>>> {
         self.actor
             .send(AnnotatedStatesMessage { access_path })
+            .await?
+    }
+
+    pub async fn list_states(
+        &self,
+        access_path: AccessPath,
+        cursor: Option<Vec<u8>>,
+        limit: usize,
+    ) -> Result<Vec<Option<(Vec<u8>, State)>>> {
+        self.actor
+            .send(ListStatesMessage {
+                access_path,
+                cursor,
+                limit,
+            })
+            .await?
+    }
+
+    pub async fn list_annotated_states(
+        &self,
+        access_path: AccessPath,
+        cursor: Option<Vec<u8>>,
+        limit: usize,
+    ) -> Result<Vec<Option<(Vec<u8>, AnnotatedState)>>> {
+        self.actor
+            .send(ListAnnotatedStatesMessage {
+                access_path,
+                cursor,
+                limit,
+            })
             .await?
     }
 

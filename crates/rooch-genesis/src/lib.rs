@@ -9,7 +9,6 @@ use moveos::moveos::MoveOSConfig;
 use moveos_stdlib_builder::BuildOptions;
 use moveos_types::transaction::{MoveAction, MoveOSTransaction};
 use once_cell::sync::Lazy;
-use rooch_framework::bindings::transaction_validator;
 use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
@@ -52,22 +51,10 @@ impl RoochGenesis {
     pub fn build_with_option(option: BuildOption) -> Result<Self> {
         let config = MoveOSConfig {
             vm_config: VMConfig::default(),
-            pre_execute_function: Some(
-                transaction_validator::TransactionValidator::pre_execute_function_id(),
-            ),
-            post_execute_function: Some(
-                transaction_validator::TransactionValidator::post_execute_function_id(),
-            ),
         };
 
         let config_for_test = MoveOSConfig {
             vm_config: VMConfig::default(),
-            pre_execute_function: Some(
-                transaction_validator::TransactionValidator::pre_execute_function_id(),
-            ),
-            post_execute_function: Some(
-                transaction_validator::TransactionValidator::post_execute_function_id(),
-            ),
         };
 
         let gas_params = rooch_framework::natives::GasParameters::zeros();
@@ -180,6 +167,7 @@ where
 mod tests {
     use crate::GenesisPackage;
     use moveos::moveos::MoveOS;
+    use moveos_store::MoveOSStore;
     use rooch_framework::natives::all_natives;
 
     #[test]
@@ -202,9 +190,14 @@ mod tests {
     #[test]
     fn test_genesis_init() {
         let genesis = super::RoochGenesis::build().expect("build rooch framework failed");
-        let db = moveos_store::MoveOSDB::new_with_memory_store();
-        let mut moveos = MoveOS::new(db, all_natives(genesis.gas_params), genesis.config)
-            .expect("init moveos failed");
+        // let db = moveos_store::MoveOSStore::new_with_memory_store();
+        let moveos_store = MoveOSStore::mock_moveos_store().unwrap();
+        let mut moveos = MoveOS::new(
+            moveos_store,
+            all_natives(genesis.gas_params),
+            genesis.config,
+        )
+        .expect("init moveos failed");
         moveos
             .init_genesis(genesis.genesis_package.genesis_txs)
             .expect("init genesis failed");

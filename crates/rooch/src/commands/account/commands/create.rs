@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #![allow(unused_imports)]
-use anyhow::{Ok, Result};
+use anyhow::Result;
 use clap::Parser;
 use move_core_types::{
     account_address::AccountAddress,
+    effects::Op,
     ident_str,
     identifier::Identifier,
     language_storage::{ModuleId, TypeTag},
@@ -23,7 +24,7 @@ use rooch_rpc_api::jsonrpc_types::ExecuteTransactionResponseView;
 use rooch_rpc_client::wallet_context::WalletContext;
 use rooch_types::{
     address::RoochAddress,
-    crypto::BuiltinScheme::Ed25519,
+    crypto::BuiltinScheme,
     error::{RoochError, RoochResult},
     transaction::{
         authenticator::Authenticator,
@@ -51,10 +52,12 @@ pub struct CreateCommand {
 impl CreateCommand {
     pub async fn execute(self) -> RoochResult<ExecuteTransactionResponseView> {
         let mut context = self.context_options.build().await?;
-        let (new_address, phrase, scheme) = context
-            .config
-            .keystore
-            .generate_and_add_new_key(Ed25519, None, None)?;
+
+        let (new_address, phrase, scheme) =
+            context
+                .config
+                .keystore
+                .generate_and_add_new_key(BuiltinScheme::Ed25519, None, None)?;
 
         println!("{}", AccountAddress::from(new_address).to_hex_literal());
         println!(
@@ -70,7 +73,10 @@ impl CreateCommand {
             vec![bcs::to_bytes(&new_address).unwrap()],
         );
 
-        context.sign_and_execute(new_address, action).await
+        let result = context
+            .sign_and_execute(new_address, action, scheme)
+            .await?;
+        context.assert_execute_success(result)
     }
 }
 

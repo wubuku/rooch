@@ -1,7 +1,10 @@
 // Copyright (c) RoochNetwork
 // SPDX-License-Identifier: Apache-2.0
 
-use super::tx_argument_resolver::TxArgumentResolver;
+use super::{
+    data_cache::{into_change_set, MoveosDataCache},
+    tx_argument_resolver::TxArgumentResolver,
+};
 use anyhow::ensure;
 use move_binary_format::{
     compatibility::Compatibility,
@@ -29,7 +32,7 @@ use move_vm_types::{
     gas::{GasMeter, UnmeteredGasMeter},
     loaded_data::runtime_types::{CachedStructIndex, StructType, Type},
 };
-use moveos_stdlib::natives::moveos_stdlib::raw_table::NativeTableContext;
+use moveos_stdlib::natives::moveos_stdlib::raw_table::{NativeTableContext, TableData};
 use moveos_types::{
     event::{Event, EventID},
     function_return_value::FunctionReturnValue,
@@ -41,26 +44,21 @@ use moveos_types::{
     tx_context::TxContext,
 };
 use moveos_verifier::verifier::INIT_FN_NAME_IDENTIFIER;
+use parking_lot::RwLock;
 use std::{borrow::Borrow, sync::Arc};
 
 /// MoveOSVM is a wrapper of MoveVM with MoveOS specific features.
 pub struct MoveOSVM {
     inner: MoveVM,
-    pre_execute_function: Option<FunctionId>,
-    post_execute_function: Option<FunctionId>,
 }
 
 impl MoveOSVM {
     pub fn new(
         natives: impl IntoIterator<Item = (AccountAddress, Identifier, Identifier, NativeFunction)>,
         vm_config: VMConfig,
-        pre_execute_function: Option<FunctionId>,
-        post_execute_function: Option<FunctionId>,
     ) -> VMResult<Self> {
         Ok(Self {
             inner: MoveVM::new_with_config(natives, vm_config)?,
-            pre_execute_function,
-            post_execute_function,
         })
     }
 
@@ -68,14 +66,16 @@ impl MoveOSVM {
         &self,
         remote: &'r S,
         ctx: TxContext,
+        pre_execute_functions: Vec<FunctionCall>,
+        post_execute_functions: Vec<FunctionCall>,
         gas_meter: G,
     ) -> MoveOSSession<'r, '_, S, G> {
         MoveOSSession::new(
             &self.inner,
             remote,
             ctx,
-            self.pre_execute_function.clone(),
-            self.post_execute_function.clone(),
+            pre_execute_functions,
+            post_execute_functions,
             gas_meter,
             false,
         )
@@ -89,7 +89,7 @@ impl MoveOSVM {
         //Do not charge gas for genesis session
         let gas_meter = UnmeteredGasMeter;
         // Genesis session do not need to execute pre_execute and post_execute function
-        MoveOSSession::new(&self.inner, remote, ctx, None, None, gas_meter, false)
+        MoveOSSession::new(&self.inner, remote, ctx, vec![], vec![], gas_meter, false)
     }
 
     pub fn new_readonly_session<'r, S: MoveOSResolver, G: GasMeter>(
@@ -98,7 +98,7 @@ impl MoveOSVM {
         ctx: TxContext,
         gas_meter: G,
     ) -> MoveOSSession<'r, '_, S, G> {
-        MoveOSSession::new(&self.inner, remote, ctx, None, None, gas_meter, true)
+        MoveOSSession::new(&self.inner, remote, ctx, vec![], vec![], gas_meter, true)
     }
 }
 
@@ -108,10 +108,11 @@ impl MoveOSVM {
 pub struct MoveOSSession<'r, 'l, S, G> {
     vm: &'l MoveVM,
     remote: &'r S,
-    session: Session<'r, 'l, S>,
+    session: Session<'r, 'l, MoveosDataCache<'r, 'l, S>>,
     ctx: StorageContext,
-    pre_execute_function: Option<FunctionId>,
-    post_execute_function: Option<FunctionId>,
+    table_data: Arc<RwLock<TableData>>,
+    pre_execute_functions: Vec<FunctionCall>,
+    post_execute_functions: Vec<FunctionCall>,
     gas_meter: G,
     read_only: bool,
 }
@@ -125,29 +126,31 @@ where
         vm: &'l MoveVM,
         remote: &'r S,
         ctx: TxContext,
-        pre_execute_function: Option<FunctionId>,
-        post_execute_function: Option<FunctionId>,
+        pre_execute_functions: Vec<FunctionCall>,
+        post_execute_functions: Vec<FunctionCall>,
         gas_meter: G,
         read_only: bool,
     ) -> Self {
         if read_only {
             assert!(
-                pre_execute_function.is_none(),
+                pre_execute_functions.is_empty(),
                 "pre_execute_function is not allowed in read only session"
             );
             assert!(
-                post_execute_function.is_none(),
+                post_execute_functions.is_empty(),
                 "post_execute_function is not allowed in read only session"
             );
         }
         let ctx = StorageContext::new(ctx);
+        let table_data = Arc::new(RwLock::new(TableData::default()));
         let s = Self {
             vm,
             remote,
-            session: Self::new_inner_session(vm, remote),
+            session: Self::new_inner_session(vm, remote, table_data.clone()),
             ctx,
-            pre_execute_function,
-            post_execute_function,
+            table_data,
+            pre_execute_functions,
+            post_execute_functions,
             gas_meter,
             read_only,
         };
@@ -156,11 +159,13 @@ where
 
     /// Re spawn a new session with the same context.
     pub fn respawn(self) -> Self {
-        //Create a new tx context with the same sender and tx hash, but drop the ids_created and kv map.
-        let tx_ctx = self.ctx.tx_context.spawn();
-        let ctx = StorageContext::new(tx_ctx);
+        //FIXME
+        //The TxContext::spawn function will reset the ids_created and kv map.
+        //But we need some TxContext value in the pre_execute and post_execute function, such as the TxValidateResult.
+        //We need to find a solution.
+        let ctx = StorageContext::new(self.ctx.tx_context.spawn());
         let s = Self {
-            session: Self::new_inner_session(self.vm, self.remote),
+            session: Self::new_inner_session(self.vm, self.remote, self.table_data.clone()),
             ctx,
             ..self
         };
@@ -168,54 +173,54 @@ where
         s.pre_execute()
     }
 
-    fn new_inner_session(vm: &'l MoveVM, remote: &'r S) -> Session<'r, 'l, S> {
+    fn new_inner_session(
+        vm: &'l MoveVM,
+        remote: &'r S,
+        table_data: Arc<RwLock<TableData>>,
+    ) -> Session<'r, 'l, MoveosDataCache<'r, 'l, S>> {
         let mut extensions = NativeContextExtensions::default();
 
-        extensions.add(NativeTableContext::new(remote));
+        extensions.add(NativeTableContext::new(remote, table_data.clone()));
 
         // The VM code loader has bugs around module upgrade. After a module upgrade, the internal
         // cache needs to be flushed to work around those bugs.
         vm.flush_loader_cache_if_invalidated();
-        vm.new_session_with_extensions(remote, extensions)
+        let loader = vm.runtime().loader();
+        let data_store: MoveosDataCache<'r, 'l, S> =
+            MoveosDataCache::new(remote, loader, table_data);
+        vm.new_session_with_cache_and_extensions(data_store, extensions)
     }
 
     /// Verify a move action.
     /// The caller should call this function when validate a transaction.
     /// If the result is error, the transaction should be rejected.
-    pub fn verify_move_action(
-        &self,
-        action: MoveAction,
-    ) -> Result<VerifiedMoveAction, anyhow::Error> {
+    pub fn verify_move_action(&self, action: MoveAction) -> VMResult<VerifiedMoveAction> {
         match action {
-            MoveAction::Script(script) => {
+            MoveAction::Script(call) => {
                 let loaded_function = self
                     .session
-                    .load_script(script.code.as_slice(), script.ty_args.clone())?;
-                moveos_verifier::verifier::verify_entry_function(&loaded_function, &self.session)?;
-                let resolved_args = self
-                    .ctx
-                    .resolve_argument(&self.session, &loaded_function, script.args.clone())
+                    .load_script(call.code.as_slice(), call.ty_args.clone())?;
+                moveos_verifier::verifier::verify_entry_function(&loaded_function, &self.session)
                     .map_err(|e| e.finish(Location::Undefined))?;
-                Ok(VerifiedMoveAction::Script {
-                    call: script,
-                    resolved_args,
-                })
+                let _resolved_args = self
+                    .ctx
+                    .resolve_argument(&self.session, &loaded_function, call.args.clone())
+                    .map_err(|e| e.finish(Location::Undefined))?;
+                Ok(VerifiedMoveAction::Script { call })
             }
-            MoveAction::Function(function) => {
+            MoveAction::Function(call) => {
                 let loaded_function = self.session.load_function(
-                    &function.function_id.module_id,
-                    &function.function_id.function_name,
-                    function.ty_args.as_slice(),
+                    &call.function_id.module_id,
+                    &call.function_id.function_name,
+                    call.ty_args.as_slice(),
                 )?;
-                moveos_verifier::verifier::verify_entry_function(&loaded_function, &self.session)?;
-                let resolved_args = self
-                    .ctx
-                    .resolve_argument(&self.session, &loaded_function, function.args.clone())
+                moveos_verifier::verifier::verify_entry_function(&loaded_function, &self.session)
                     .map_err(|e| e.finish(Location::Undefined))?;
-                Ok(VerifiedMoveAction::Function {
-                    call: function,
-                    resolved_args,
-                })
+                let _resolved_args = self
+                    .ctx
+                    .resolve_argument(&self.session, &loaded_function, call.args.clone())
+                    .map_err(|e| e.finish(Location::Undefined))?;
+                Ok(VerifiedMoveAction::Function { call })
             }
             MoveAction::ModuleBundle(module_bundle) => {
                 let compiled_modules = deserialize_modules(&module_bundle)?;
@@ -229,7 +234,7 @@ where
                                 init_function_modules.push(module.self_id())
                             }
                         }
-                        Err(err) => return Err(err.into()),
+                        Err(err) => return Err(err),
                     }
                 }
 
@@ -248,38 +253,54 @@ where
     /// and we need to save the result and deduct gas
     pub fn execute_move_action(&mut self, action: VerifiedMoveAction) -> VMResult<()> {
         match action {
-            VerifiedMoveAction::Script {
-                call,
-                resolved_args,
-            } => self
-                .session
-                .execute_script(call.code, call.ty_args, resolved_args, &mut self.gas_meter)
-                .map(|ret| {
-                    debug_assert!(
-                        ret.return_values.is_empty(),
-                        "Script function should not return values"
-                    );
-                    self.update_storage_context_via_return_values(&ret);
-                }),
-            VerifiedMoveAction::Function {
-                call,
-                resolved_args,
-            } => self
-                .session
-                .execute_entry_function(
+            VerifiedMoveAction::Script { call } => {
+                let loaded_function = self
+                    .session
+                    .load_script(call.code.as_slice(), call.ty_args.clone())?;
+
+                let resolved_args = self
+                    .ctx
+                    .resolve_argument(&self.session, &loaded_function, call.args)
+                    .map_err(|e| e.finish(Location::Undefined))?;
+
+                self.session
+                    .execute_script(call.code, call.ty_args, resolved_args, &mut self.gas_meter)
+                    .map(|ret| {
+                        debug_assert!(
+                            ret.return_values.is_empty(),
+                            "Script function should not return values"
+                        );
+                        self.update_storage_context_via_return_values(&ret);
+                    })
+            }
+            VerifiedMoveAction::Function { call } => {
+                let loaded_function = self.session.load_function(
                     &call.function_id.module_id,
                     &call.function_id.function_name,
-                    call.ty_args.clone(),
-                    resolved_args,
-                    &mut self.gas_meter,
-                )
-                .map(|ret| {
-                    debug_assert!(
-                        ret.return_values.is_empty(),
-                        "Entry function should not return values"
-                    );
-                    self.update_storage_context_via_return_values(&ret);
-                }),
+                    call.ty_args.as_slice(),
+                )?;
+
+                let resolved_args = self
+                    .ctx
+                    .resolve_argument(&self.session, &loaded_function, call.args)
+                    .map_err(|e| e.finish(Location::Undefined))?;
+
+                self.session
+                    .execute_entry_function(
+                        &call.function_id.module_id,
+                        &call.function_id.function_name,
+                        call.ty_args.clone(),
+                        resolved_args,
+                        &mut self.gas_meter,
+                    )
+                    .map(|ret| {
+                        debug_assert!(
+                            ret.return_values.is_empty(),
+                            "Entry function should not return values"
+                        );
+                        self.update_storage_context_via_return_values(&ret);
+                    })
+            }
             VerifiedMoveAction::ModuleBundle {
                 module_bundle,
                 init_function_modules,
@@ -334,7 +355,9 @@ where
         let resolved_args = self
             .ctx
             .resolve_argument(&self.session, &loaded_function, call.args)
-            .map_err(|e| e.finish(Location::Undefined))?;
+            .map_err(|e: move_binary_format::errors::PartialVMError| {
+                e.finish(Location::Undefined)
+            })?;
 
         let return_values = self.session.execute_function_bypass_visibility(
             &call.function_id.module_id,
@@ -396,17 +419,27 @@ where
             }
         };
 
-        let (changeset, raw_events, mut extensions) =
-            finalized_session.session.finish_with_extensions()?;
-        let table_context: NativeTableContext = extensions.remove();
-        let state_changeset = table_context
-            .into_change_set()
-            .map_err(|e| e.finish(Location::Undefined))?;
+        let MoveOSSession {
+            vm: _,
+            remote: _,
+            session,
+            ctx,
+            table_data,
+            pre_execute_functions: _,
+            post_execute_functions: _,
+            gas_meter: _,
+            read_only,
+        } = finalized_session;
+        let (changeset, raw_events, extensions) = session.finish_with_extensions()?;
+        drop(extensions);
 
-        if finalized_session.read_only {
+        let state_changeset =
+            into_change_set(table_data).map_err(|e| e.finish(Location::Undefined))?;
+
+        if read_only {
             ensure!(
                 changeset.accounts().is_empty(),
-                "ChangeSet should be empty when execute readonly function"
+                "ChangeSet should be empty as never used."
             );
             ensure!(
                 raw_events.is_empty(),
@@ -417,7 +450,7 @@ where
                 "Table change set should be empty when execute readonly function"
             );
             ensure!(
-                finalized_session.ctx.tx_context.ids_created == 0,
+                ctx.tx_context.ids_created == 0,
                 "ids_created should be zero when execute readonly function"
             );
         }
@@ -434,7 +467,7 @@ where
         //TODO calculate the gas_used with gas_meter
         let gas_used = 0;
         Ok((
-            finalized_session.ctx.tx_context,
+            ctx.tx_context,
             TransactionOutput {
                 status,
                 changeset,
@@ -449,13 +482,11 @@ where
         // the read_only function should not execute pre_execute function
         // this ensure via the check in new_session
         let mut pre_execute_session = self;
-        if let Some(pre_execute_function) = &pre_execute_session.pre_execute_function {
+        for function_call in pre_execute_session.pre_execute_functions.clone() {
+            //TODO handle pre_execute function error
+            //Because if we allow user to write pre_execute function, we need to handle the error
             pre_execute_session
-                .execute_function_bypass_visibility(FunctionCall::new(
-                    pre_execute_function.clone(),
-                    vec![],
-                    vec![],
-                ))
+                .execute_function_bypass_visibility(function_call)
                 .expect("pre_execute function should always success");
         }
         pre_execute_session
@@ -473,13 +504,10 @@ where
                     self.respawn()
                 }
             };
-            if let Some(post_execute_function) = &post_execute_session.post_execute_function {
+            for function_call in post_execute_session.post_execute_functions.clone() {
+                //TODO handle post_execute function error
                 post_execute_session
-                    .execute_function_bypass_visibility(FunctionCall::new(
-                        post_execute_function.clone(),
-                        vec![],
-                        vec![],
-                    ))
+                    .execute_function_bypass_visibility(function_call)
                     .expect("post_execute function should always success");
             }
             (post_execute_session, execute_status)
@@ -540,7 +568,7 @@ where
         self.session.get_native_extensions()
     }
 
-    pub fn runtime_session(&self) -> &Session<'r, 'l, S> {
+    pub fn runtime_session(&self) -> &Session<'r, 'l, MoveosDataCache<'r, 'l, S>> {
         self.session.borrow()
     }
 }

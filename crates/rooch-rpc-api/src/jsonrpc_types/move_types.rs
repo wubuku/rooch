@@ -44,7 +44,6 @@ pub type AccessPathView = StrView<AccessPath>;
 pub type AccountAddressView = StrView<AccountAddress>;
 
 impl_str_view_for! {TypeTag StructTag FunctionId AccessPath}
-// impl_str_view_for! {TypeTag StructTag ModuleId FunctionId}
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct AnnotatedMoveStructView {

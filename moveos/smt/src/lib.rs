@@ -144,6 +144,25 @@ where
         }
     }
 
+    /// List the (key, value) from the tree.
+    pub fn list(&self, starting_key: Option<K>, limit: usize) -> Result<Vec<Option<(K, V)>>> {
+        let mut iter = self.iter(starting_key.clone())?;
+
+        let mut data = Vec::new();
+        // skip the starting_key if starting_key not NONE
+        if Option::is_some(&starting_key) {
+            let _item = iter.next();
+        }
+        for (data_size, item) in iter.enumerate() {
+            if data_size >= limit {
+                break;
+            }
+            let (k, v) = item?;
+            data.push(Some((k, v)));
+        }
+        Ok(data)
+    }
+
     /// Returns the iterator of the tree for scan the tree.
     /// Note: the key in the tree is sorted by the hash of the key, not origin key.
     /// So the iterator will return the key in the hash order, the starting_key is the first key to start scan.
@@ -177,7 +196,7 @@ where
 
         self.node_store.write_nodes(node_map)?;
         let new_state_root: H256 = new_state_root.into();
-        //TODO handle change_set's stale_node_index
+        //TODO handle change_set's state_node_index
         *self.root_hash.write() = new_state_root;
 
         Ok(new_state_root)
@@ -185,6 +204,18 @@ where
 
     pub fn is_genesis(&self) -> bool {
         self.root_hash() == *SPARSE_MERKLE_PLACEHOLDER_HASH
+    }
+
+    /// Dump all (key, value) from the tree
+    pub fn dump(&self) -> Result<Vec<(K, V)>> {
+        let iter = self.iter(None)?;
+
+        let mut data = Vec::new();
+        for (_data_size, item) in iter.enumerate() {
+            let (k, v) = item?;
+            data.push((k, v));
+        }
+        Ok(data)
     }
 }
 

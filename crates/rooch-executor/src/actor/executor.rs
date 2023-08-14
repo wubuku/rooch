@@ -6,7 +6,10 @@ use super::messages::{
     ExecuteViewFunctionMessage, GetEventsByEventHandleMessage, GetEventsMessage, ResolveMessage,
     StatesMessage, ValidateTransactionMessage,
 };
-use crate::actor::messages::{GetTransactionInfosByTxHashMessage, GetTxSeqMappingByTxOrderMessage};
+use crate::actor::messages::{
+    GetTransactionInfosByTxHashMessage, GetTxSeqMappingByTxOrderMessage,
+    ListAnnotatedStatesMessage, ListStatesMessage,
+};
 use anyhow::bail;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -15,7 +18,8 @@ use move_core_types::account_address::AccountAddress;
 use move_resource_viewer::MoveValueAnnotator;
 use moveos::moveos::MoveOS;
 use moveos_common::accumulator::InMemoryAccumulator;
-use moveos_store::MoveOSDB;
+use moveos_store::transaction_store::TransactionStore;
+use moveos_store::MoveOSStore;
 use moveos_types::event::AnnotatedMoveOSEvent;
 use moveos_types::event::EventHandle;
 use moveos_types::function_return_value::AnnotatedFunctionReturnValue;
@@ -23,46 +27,46 @@ use moveos_types::module_binding::MoveFunctionCaller;
 use moveos_types::move_types::as_struct_tag;
 use moveos_types::state::{AnnotatedState, State};
 use moveos_types::state_resolver::{AnnotatedStateReader, StateReader};
+use moveos_types::transaction::FunctionCall;
 use moveos_types::transaction::TransactionExecutionInfo;
 use moveos_types::transaction::VerifiedMoveOSTransaction;
+use moveos_types::tx_context::TxContext;
 use rooch_framework::bindings::address_mapping::AddressMapping;
+use rooch_framework::bindings::auth_validator::AuthValidatorCaller;
 use rooch_framework::bindings::transaction_validator::TransactionValidator;
 use rooch_genesis::RoochGenesis;
-use rooch_store::RoochDB;
+use rooch_store::RoochStore;
 use rooch_types::address::MultiChainAddress;
+use rooch_types::framework::auth_validator::TxValidateResult;
+use rooch_types::transaction::AuthenticatorInfo;
 use rooch_types::transaction::{AbstractTransaction, TransactionSequenceMapping};
 
 pub struct ExecutorActor {
     moveos: MoveOS,
-    rooch_db: RoochDB,
+    rooch_store: RoochStore,
 }
 
 impl ExecutorActor {
-    pub fn new(rooch_db: RoochDB) -> Result<Self> {
-        let moveosdb = MoveOSDB::new_with_memory_store();
+    pub fn new(moveos_store: MoveOSStore, rooch_store: RoochStore) -> Result<Self> {
         let genesis: &RoochGenesis = &rooch_genesis::ROOCH_GENESIS;
 
-        let mut moveos = MoveOS::new(moveosdb, genesis.all_natives(), genesis.config.clone())?;
+        let mut moveos = MoveOS::new(moveos_store, genesis.all_natives(), genesis.config.clone())?;
         if moveos.state().is_genesis() {
             moveos.init_genesis(genesis.genesis_txs())?;
         }
-        Ok(Self { moveos, rooch_db })
+        Ok(Self {
+            moveos,
+            rooch_store,
+        })
     }
 
-    pub fn resolve_address(
+    pub fn resolve_or_generate(
         &self,
         multi_chain_address_sender: MultiChainAddress,
     ) -> Result<AccountAddress> {
         let resolved_sender = {
             let address_mapping = self.moveos.as_module_bundle::<AddressMapping>();
-            address_mapping
-                .resolve(multi_chain_address_sender.clone())?
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "the multiaddress sender({}) mapping record is not exists.",
-                        multi_chain_address_sender
-                    )
-                })?
+            address_mapping.resovle_or_generate(multi_chain_address_sender)?
         };
 
         Ok(resolved_sender)
@@ -71,23 +75,28 @@ impl ExecutorActor {
     pub fn validate<T: AbstractTransaction>(&self, tx: T) -> Result<VerifiedMoveOSTransaction> {
         let multi_chain_address_sender = tx.sender();
 
-        let resolved_sender = self.resolve_address(multi_chain_address_sender.clone());
+        let resolved_sender = self.resolve_or_generate(multi_chain_address_sender.clone());
         let authenticator = tx.authenticator_info();
 
         let mut moveos_tx = tx.construct_moveos_transaction(resolved_sender?)?;
 
-        let result = {
-            let tx_validator = self.moveos.as_module_bundle::<TransactionValidator>();
-            tx_validator.validate(&moveos_tx.ctx, authenticator)
-        };
+        let result = self.validate_authenticator(&moveos_tx.ctx, authenticator);
 
         match result {
-            Ok(_) => {
+            Ok((tx_validate_result, pre_execute_functions, post_execute_functions)) => {
                 // Add the original multichain address to the context
                 moveos_tx
                     .ctx
                     .add(multi_chain_address_sender)
                     .expect("add sender to context failed");
+                // Add the tx_validate_result to the context
+                moveos_tx
+                    .ctx
+                    .add(tx_validate_result)
+                    .expect("add tx_validate_result failed");
+
+                moveos_tx.append_pre_execute_functions(pre_execute_functions);
+                moveos_tx.append_post_execute_functions(post_execute_functions);
                 Ok(self.moveos.verify(moveos_tx)?)
             }
             Err(e) => {
@@ -99,6 +108,84 @@ impl ExecutorActor {
                 bail!("validate failed: {:?}", e)
             }
         }
+    }
+
+    pub fn validate_authenticator(
+        &self,
+        ctx: &TxContext,
+        authenticator: AuthenticatorInfo,
+    ) -> Result<(TxValidateResult, Vec<FunctionCall>, Vec<FunctionCall>)> {
+        let tx_validator = self.moveos.as_module_bundle::<TransactionValidator>();
+        let tx_validate_result = tx_validator.validate(ctx, authenticator.clone())?;
+        let auth_validator_option = tx_validate_result.auth_validator();
+        match auth_validator_option {
+            Some(auth_validator) => {
+                let auth_validator_caller = AuthValidatorCaller::new(&self.moveos, auth_validator);
+                auth_validator_caller.validate(ctx, authenticator.authenticator.payload)?;
+                // pre_execute_function: TransactionValidator first, then AuthValidator
+                let pre_execute_functions = vec![
+                    TransactionValidator::pre_execute_function_call(),
+                    auth_validator_caller.pre_execute_function_call(),
+                ];
+                // post_execute_function: AuthValidator first, then TransactionValidator
+                let post_execute_functions = vec![
+                    auth_validator_caller.post_execute_function_call(),
+                    TransactionValidator::post_execute_function_call(),
+                ];
+                Ok((
+                    tx_validate_result,
+                    pre_execute_functions,
+                    post_execute_functions,
+                ))
+            }
+            None => {
+                let pre_execute_functions = vec![TransactionValidator::pre_execute_function_call()];
+                let post_execute_functions =
+                    vec![TransactionValidator::post_execute_function_call()];
+                Ok((
+                    tx_validate_result,
+                    pre_execute_functions,
+                    post_execute_functions,
+                ))
+            }
+        }
+    }
+
+    pub fn get_rooch_store(&self) -> RoochStore {
+        self.rooch_store.clone()
+    }
+
+    pub fn moveos(&self) -> &MoveOS {
+        &self.moveos
+    }
+
+    pub fn execute(&mut self, tx: VerifiedMoveOSTransaction) -> Result<ExecuteTransactionResult> {
+        let tx_hash = tx.ctx.tx_hash();
+        let (state_root, output) = self.moveos.execute_and_apply(tx)?;
+        let event_hashes: Vec<_> = output.events.iter().map(|e| e.hash()).collect();
+        let event_root = InMemoryAccumulator::from_leaves(event_hashes.as_slice()).root_hash();
+
+        let transaction_info = TransactionExecutionInfo::new(
+            tx_hash,
+            state_root,
+            event_root,
+            0,
+            output.status.clone(),
+        );
+        self.moveos
+            .transaction_store()
+            .save_tx_exec_info(transaction_info.clone())
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "ExecuteTransactionMessage handler save tx info failed: {:?} {}",
+                    transaction_info,
+                    e
+                )
+            })?;
+        Ok(ExecuteTransactionResult {
+            output,
+            transaction_info,
+        })
     }
 }
 
@@ -125,25 +212,7 @@ impl Handler<ExecuteTransactionMessage> for ExecutorActor {
         msg: ExecuteTransactionMessage,
         _ctx: &mut ActorContext,
     ) -> Result<ExecuteTransactionResult> {
-        let tx_hash = msg.tx.ctx.tx_hash();
-        let (state_root, output) = self.moveos.execute(msg.tx)?;
-        let event_hashes: Vec<_> = output.events.iter().map(|e| e.hash()).collect();
-        let event_root = InMemoryAccumulator::from_leaves(event_hashes.as_slice()).root_hash();
-
-        let transaction_info = TransactionExecutionInfo::new(
-            tx_hash,
-            state_root,
-            event_root,
-            0,
-            output.status.clone(),
-        );
-        self.moveos
-            .transaction_store()
-            .save_tx_exec_info(transaction_info.clone());
-        Ok(ExecuteTransactionResult {
-            output,
-            transaction_info,
-        })
+        self.execute(msg.tx)
     }
 }
 
@@ -177,7 +246,7 @@ impl Handler<ResolveMessage> for ExecutorActor {
         msg: ResolveMessage,
         _ctx: &mut ActorContext,
     ) -> Result<AccountAddress, anyhow::Error> {
-        self.resolve_address(msg.address)
+        self.resolve_or_generate(msg.address)
     }
 }
 
@@ -202,6 +271,30 @@ impl Handler<AnnotatedStatesMessage> for ExecutorActor {
     ) -> Result<Vec<Option<AnnotatedState>>, anyhow::Error> {
         let statedb = self.moveos.moveos_resolver();
         statedb.get_annotated_states(msg.access_path)
+    }
+}
+
+#[async_trait]
+impl Handler<ListStatesMessage> for ExecutorActor {
+    async fn handle(
+        &mut self,
+        msg: ListStatesMessage,
+        _ctx: &mut ActorContext,
+    ) -> Result<Vec<Option<(Vec<u8>, State)>>, anyhow::Error> {
+        let statedb = self.moveos.moveos_resolver();
+        statedb.list_states(msg.access_path, msg.cursor, msg.limit)
+    }
+}
+
+#[async_trait]
+impl Handler<ListAnnotatedStatesMessage> for ExecutorActor {
+    async fn handle(
+        &mut self,
+        msg: ListAnnotatedStatesMessage,
+        _ctx: &mut ActorContext,
+    ) -> Result<Vec<Option<(Vec<u8>, AnnotatedState)>>, anyhow::Error> {
+        let statedb = self.moveos.moveos_resolver();
+        statedb.list_annotated_states(msg.access_path, msg.cursor, msg.limit)
     }
 }
 
@@ -284,9 +377,8 @@ impl Handler<GetTxSeqMappingByTxOrderMessage> for ExecutorActor {
         _ctx: &mut ActorContext,
     ) -> Result<Vec<TransactionSequenceMapping>> {
         let GetTxSeqMappingByTxOrderMessage { cursor, limit } = msg;
-        let rooch_tx_store = self.rooch_db.get_transaction_store();
-        let result = rooch_tx_store.get_tx_seq_mapping_by_tx_order(cursor, limit);
-        Ok(result)
+        let rooch_tx_store = self.rooch_store.get_transaction_store();
+        rooch_tx_store.get_tx_seq_mapping_by_tx_order(cursor, limit)
     }
 }
 
@@ -298,8 +390,8 @@ impl Handler<GetTransactionInfosByTxHashMessage> for ExecutorActor {
         _ctx: &mut ActorContext,
     ) -> Result<Vec<Option<TransactionExecutionInfo>>> {
         let GetTransactionInfosByTxHashMessage { tx_hashes } = msg;
-        let moveos_tx_store = self.moveos.transaction_store();
-        let result = moveos_tx_store.multi_get_tx_exec_infos(tx_hashes);
-        Ok(result)
+        self.moveos
+            .transaction_store()
+            .multi_get_tx_exec_infos(tx_hashes)
     }
 }

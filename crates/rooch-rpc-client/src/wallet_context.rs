@@ -8,7 +8,7 @@ use move_core_types::account_address::AccountAddress;
 use moveos_types::transaction::MoveAction;
 use rooch_config::{rooch_config_dir, Config, PersistedConfig, ROOCH_CLIENT_CONFIG};
 use rooch_key::keystore::AccountKeystore;
-use rooch_rpc_api::jsonrpc_types::ExecuteTransactionResponseView;
+use rooch_rpc_api::jsonrpc_types::{ExecuteTransactionResponseView, KeptVMStatusView};
 use rooch_types::address::RoochAddress;
 use rooch_types::crypto::{BuiltinScheme, Signature};
 use rooch_types::error::{RoochError, RoochResult};
@@ -99,17 +99,25 @@ impl WalletContext {
         &self,
         sender: RoochAddress,
         action: MoveAction,
+        scheme: BuiltinScheme,
     ) -> RoochResult<RoochTransaction> {
-        let pk = self.config.keystore.get_key(&sender).ok().ok_or_else(|| {
-            RoochError::SignMessageError(format!("Cannot find key for address: [{sender}]"))
-        })?;
+        let kp = self
+            .config
+            .keystore
+            .get_key_pair_by_scheme(&sender, scheme)
+            .ok()
+            .ok_or_else(|| {
+                RoochError::SignMessageError(format!("Cannot find key for address: [{sender}]"))
+            })?;
 
         let tx_data = self.build_tx_data(sender, action).await?;
-        let signature = Signature::new_hashed(tx_data.hash().as_bytes(), pk);
-        let auth = match pk.public().scheme() {
+        let signature = Signature::new_hashed(tx_data.hash().as_bytes(), kp);
+        let auth = match kp.public().scheme() {
             BuiltinScheme::Ed25519 => Authenticator::ed25519(signature),
-            BuiltinScheme::Ecdsa => todo!(),
+            BuiltinScheme::Ecdsa => Authenticator::ecdsa(signature),
+            BuiltinScheme::EcdsaRecoverable => Authenticator::ecdsa_recoverable(signature),
             BuiltinScheme::MultiEd25519 => todo!(),
+            BuiltinScheme::Schnorr => Authenticator::schnorr(signature),
         };
         Ok(RoochTransaction::new(tx_data, auth))
     }
@@ -129,8 +137,9 @@ impl WalletContext {
         &self,
         sender: RoochAddress,
         action: MoveAction,
+        scheme: BuiltinScheme,
     ) -> RoochResult<ExecuteTransactionResponseView> {
-        let tx = self.sign(sender, action).await?;
+        let tx = self.sign(sender, action, scheme).await?;
         self.execute(tx).await
     }
 
@@ -150,6 +159,20 @@ impl WalletContext {
             };
 
             Ok(address)
+        }
+    }
+
+    pub fn assert_execute_success(
+        &self,
+        result: ExecuteTransactionResponseView,
+    ) -> RoochResult<ExecuteTransactionResponseView> {
+        if KeptVMStatusView::Executed != result.execution_info.status {
+            Err(RoochError::TransactionError(format!(
+                "Transaction execution failed: {:?}",
+                result.execution_info.status
+            )))
+        } else {
+            Ok(result)
         }
     }
 }

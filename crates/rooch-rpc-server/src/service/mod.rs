@@ -89,6 +89,26 @@ impl RpcService {
         self.executor.get_annotated_states(access_path).await
     }
 
+    pub async fn list_states(
+        &self,
+        access_path: AccessPath,
+        cursor: Option<Vec<u8>>,
+        limit: usize,
+    ) -> Result<Vec<Option<(Vec<u8>, State)>>> {
+        self.executor.list_states(access_path, cursor, limit).await
+    }
+
+    pub async fn list_annotated_states(
+        &self,
+        access_path: AccessPath,
+        cursor: Option<Vec<u8>>,
+        limit: usize,
+    ) -> Result<Vec<Option<(Vec<u8>, AnnotatedState)>>> {
+        self.executor
+            .list_annotated_states(access_path, cursor, limit)
+            .await
+    }
+
     /// Sign a message with the private key of the given address.
     pub async fn sign(&self, _address: RoochAddress, _message: Vec<u8>) -> Result<Vec<u8>> {
         bail!("Not implemented")

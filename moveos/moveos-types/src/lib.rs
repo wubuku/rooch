@@ -3,7 +3,6 @@
 
 pub mod access_path;
 pub mod addresses;
-pub mod error;
 pub mod event;
 pub mod event_filter;
 pub mod function_return_value;
@@ -13,10 +12,12 @@ pub mod move_any;
 pub mod move_module;
 pub mod move_option;
 pub mod move_simple_map;
+pub mod move_std;
 pub mod move_string;
 pub mod move_types;
 pub mod object;
 pub mod serde;
+pub mod startup_info;
 pub mod state;
 pub mod state_resolver;
 pub mod storage_context;

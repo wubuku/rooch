@@ -8,10 +8,18 @@ use crate::service::RpcService;
 use anyhow::Result;
 use coerce::actor::scheduler::timer::Timer;
 use coerce::actor::{system::ActorSystem, IntoActor};
+use hyper::header::HeaderValue;
+use hyper::Method;
 use jsonrpsee::http_client::{HttpClient, HttpClientBuilder};
 use jsonrpsee::server::ServerBuilder;
 use jsonrpsee::RpcModule;
+use moveos_config::store_config::RocksdbConfig;
+use moveos_store::config_store::ConfigStore;
+use moveos_store::{MoveOSDB, MoveOSStore};
+use raw_store::rocks::RocksDB;
+use raw_store::StoreInstance;
 use rooch_config::rpc::server_config::ServerConfig;
+use rooch_config::store_config::StoreConfig;
 use rooch_executor::actor::executor::ExecutorActor;
 use rooch_executor::proxy::ExecutorProxy;
 use rooch_key::key_derive::generate_new_key;
@@ -21,11 +29,13 @@ use rooch_proposer::proxy::ProposerProxy;
 use rooch_rpc_api::api::RoochRpcModule;
 use rooch_sequencer::actor::sequencer::SequencerActor;
 use rooch_sequencer::proxy::SequencerProxy;
-use rooch_store::RoochDB;
+use rooch_store::RoochStore;
 use serde_json::json;
+use std::env;
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::time::Duration;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::info;
 
 pub mod server;
@@ -67,8 +77,8 @@ impl Service {
         Self { handle: None }
     }
 
-    pub async fn start(&mut self) -> Result<()> {
-        self.handle = Some(start_server().await?);
+    pub async fn start(&mut self, is_mock_storage: bool) -> Result<()> {
+        self.handle = Some(start_server(is_mock_storage).await?);
         Ok(())
     }
 
@@ -103,27 +113,27 @@ impl RpcModuleBuilder {
 }
 
 // Start json-rpc server
-pub async fn start_server() -> Result<ServerHandle> {
+pub async fn start_server(is_mock_storage: bool) -> Result<ServerHandle> {
     tracing_subscriber::fmt::init();
 
     let config = ServerConfig::default();
 
     let addr: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
-    let rooch_db = RoochDB::new_with_memory_store();
     let actor_system = ActorSystem::global_system();
 
+    //Init store
+    let (moveos_store, rooch_store) = init_stroage(is_mock_storage)?;
+
     // Init executor
-    let executor = ExecutorActor::new(rooch_db.clone())?
+    let executor = ExecutorActor::new(moveos_store, rooch_store.clone())?
         .into_actor(Some("Executor"), &actor_system)
         .await?;
     let executor_proxy = ExecutorProxy::new(executor.into());
 
     // Init sequencer
     //TODO load from config
-
     let (_, kp, _, _) = generate_new_key(rooch_types::crypto::BuiltinScheme::Ed25519, None, None)?;
-    // let rooch_db = RoochDB::new_with_memory_store();
-    let sequencer = SequencerActor::new(kp, rooch_db)
+    let sequencer = SequencerActor::new(kp, rooch_store)
         .into_actor(Some("Sequencer"), &actor_system)
         .await?;
     let sequencer_proxy = SequencerProxy::new(sequencer.into());
@@ -145,8 +155,33 @@ pub async fn start_server() -> Result<ServerHandle> {
 
     let rpc_service = RpcService::new(executor_proxy, sequencer_proxy, proposer_proxy);
 
+    let acl = match env::var("ACCESS_CONTROL_ALLOW_ORIGIN") {
+        Ok(value) => {
+            let allow_hosts = value
+                .split(',')
+                .map(HeaderValue::from_str)
+                .collect::<Result<Vec<_>, _>>()?;
+            AllowOrigin::list(allow_hosts)
+        }
+        _ => AllowOrigin::any(),
+    };
+    info!(?acl);
+
+    let cors: CorsLayer = CorsLayer::new()
+        // Allow `POST` when accessing the resource
+        .allow_methods([Method::POST])
+        // Allow requests from any origin
+        .allow_origin(acl)
+        .allow_headers([hyper::header::CONTENT_TYPE]);
+
+    // TODO: tracing
+    let middleware = tower::ServiceBuilder::new().layer(cors);
+
     // Build server
-    let server = ServerBuilder::default().build(&addr).await?;
+    let server = ServerBuilder::default()
+        .set_middleware(middleware)
+        .build(&addr)
+        .await?;
 
     let mut rpc_module_builder = RpcModuleBuilder::new();
     rpc_module_builder
@@ -183,4 +218,45 @@ fn _build_rpc_api<M: Send + Sync + 'static>(mut rpc_module: RpcModule<M>) -> Rpc
         .expect("infallible all other methods have their own address space");
 
     rpc_module
+}
+
+fn init_stroage(is_mock_storage: bool) -> Result<(MoveOSStore, RoochStore)> {
+    let (rooch_db_path, moveos_db_path) = if !is_mock_storage {
+        (
+            StoreConfig::get_rooch_store_dir(),
+            StoreConfig::get_moveos_store_dir(),
+        )
+    } else {
+        (
+            moveos_config::temp_dir().path().to_path_buf(),
+            moveos_config::temp_dir().path().to_path_buf(),
+        )
+    };
+
+    //Init store
+    let moveosdb = MoveOSDB::new(StoreInstance::new_db_instance(
+        RocksDB::new(
+            moveos_db_path,
+            moveos_store::StoreMeta::get_column_family_names().to_vec(),
+            RocksdbConfig::default(),
+            None,
+        )
+        .unwrap(),
+    ))?;
+    let lastest_state_root = moveosdb
+        .config_store
+        .get_startup_info()?
+        .map(|info| info.state_root_hash);
+    let moveos_store = MoveOSStore::new_with_root(moveosdb, lastest_state_root).unwrap();
+
+    let rooch_store = RoochStore::new(StoreInstance::new_db_instance(
+        RocksDB::new(
+            rooch_db_path,
+            rooch_store::StoreMeta::get_column_family_names().to_vec(),
+            RocksdbConfig::default(),
+            None,
+        )
+        .unwrap(),
+    ))?;
+    Ok((moveos_store, rooch_store))
 }

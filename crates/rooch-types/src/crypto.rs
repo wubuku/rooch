@@ -5,6 +5,7 @@ use crate::{
     address::RoochAddress,
     error::{RoochError, RoochResult},
 };
+use clap::ArgEnum;
 use derive_more::{AsMut, AsRef, From};
 pub use enum_dispatch::enum_dispatch;
 use eyre::eyre;
@@ -14,8 +15,8 @@ use fastcrypto::hash::{Blake2b256, HashFunction};
 pub use fastcrypto::traits::KeyPair as KeypairTraits;
 pub use fastcrypto::traits::Signer;
 pub use fastcrypto::traits::{
-    AggregateAuthenticator, Authenticator, EncodeDecodeBase64, SigningKey, ToFromBytes,
-    VerifyingKey,
+    AggregateAuthenticator, Authenticator, EncodeDecodeBase64, RecoverableSignature,
+    RecoverableSigner, SigningKey, ToFromBytes, VerifyingKey,
 };
 use fastcrypto::{
     ed25519::{
@@ -23,9 +24,25 @@ use fastcrypto::{
         Ed25519SignatureAsBytes,
     },
     secp256k1::{
-        Secp256k1KeyPair, Secp256k1PublicKey, Secp256k1PublicKeyAsBytes, Secp256k1Signature,
+        recoverable::{
+            Secp256k1RecoverableKeyPair, Secp256k1RecoverablePublicKey,
+            Secp256k1RecoverablePublicKeyAsBytes, Secp256k1RecoverableSignature,
+            Secp256k1RecoverableSignatureAsBytes,
+        },
+        schnorr::{
+            SchnorrKeyPair, SchnorrPublicKey, SchnorrPublicKeyAsBytes, SchnorrSignature,
+            SchnorrSignatureAsBytes,
+        },
+        // TODO wrap it to ecdsa
+        Secp256k1KeyPair,
+        Secp256k1PublicKey,
+        Secp256k1PublicKeyAsBytes,
+        Secp256k1Signature,
         Secp256k1SignatureAsBytes,
     },
+};
+use move_core_types::{
+    account_address::AccountAddress, identifier::Identifier, language_storage::StructTag,
 };
 use moveos_types::{h256::H256, serde::Readable};
 use rand::{rngs::StdRng, SeedableRng};
@@ -34,7 +51,7 @@ use serde::ser::Serializer;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_with::{serde_as, Bytes};
 use std::{hash::Hash, str::FromStr};
-use strum_macros::EnumString;
+use strum_macros::{Display, EnumString};
 
 pub type DefaultHash = Blake2b256;
 
@@ -42,20 +59,43 @@ pub type DefaultHash = Blake2b256;
 /// It is a part of `AccountAbstraction`
 
 /// The Authenticator scheme which builtin Rooch
-#[derive(Copy, Clone, Debug, EnumString, strum_macros::Display)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    EnumString,
+    PartialEq,
+    Eq,
+    ArgEnum,
+    Display,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+)]
 #[strum(serialize_all = "lowercase")]
 pub enum BuiltinScheme {
     Ed25519,
     MultiEd25519,
     Ecdsa,
+    EcdsaRecoverable,
+    Schnorr,
 }
 
 impl BuiltinScheme {
+    const ED25519_FLAG: u8 = 0x00;
+    const MULTIED25519_FLAG: u8 = 0x01;
+    const ECDSA_FLAG: u8 = 0x02;
+    const ECDSARECOVERABLE_FLAG: u8 = 0x03;
+    const SCHNORR_FLAG: u8 = 0x04;
+
     pub fn flag(&self) -> u8 {
         match self {
-            BuiltinScheme::Ed25519 => 0x00,
-            BuiltinScheme::MultiEd25519 => 0x01,
-            BuiltinScheme::Ecdsa => 0x02,
+            BuiltinScheme::Ed25519 => Self::ED25519_FLAG,
+            BuiltinScheme::MultiEd25519 => Self::MULTIED25519_FLAG,
+            BuiltinScheme::Ecdsa => Self::ECDSA_FLAG,
+            BuiltinScheme::EcdsaRecoverable => Self::ECDSARECOVERABLE_FLAG,
+            BuiltinScheme::Schnorr => Self::SCHNORR_FLAG,
         }
     }
 
@@ -63,18 +103,47 @@ impl BuiltinScheme {
         let byte_int = flag
             .parse::<u8>()
             .map_err(|_| RoochError::KeyConversionError("Invalid key scheme".to_owned()))?;
-        Self::from_flag_byte(&byte_int)
+        Self::from_flag_byte(byte_int)
     }
 
-    pub fn from_flag_byte(byte_int: &u8) -> Result<BuiltinScheme, RoochError> {
+    pub fn from_flag_byte(byte_int: u8) -> Result<BuiltinScheme, RoochError> {
         match byte_int {
-            0x00 => Ok(BuiltinScheme::Ed25519),
-            0x01 => Ok(BuiltinScheme::MultiEd25519),
-            0x02 => Ok(BuiltinScheme::Ecdsa),
+            Self::ED25519_FLAG => Ok(BuiltinScheme::Ed25519),
+            Self::MULTIED25519_FLAG => Ok(BuiltinScheme::MultiEd25519),
+            Self::ECDSA_FLAG => Ok(BuiltinScheme::Ecdsa),
+            Self::ECDSARECOVERABLE_FLAG => Ok(BuiltinScheme::EcdsaRecoverable),
+            Self::SCHNORR_FLAG => Ok(BuiltinScheme::Schnorr),
             _ => Err(RoochError::KeyConversionError(
                 "Invalid key scheme".to_owned(),
             )),
         }
+    }
+
+    pub fn get_validator_name(&self) -> Result<String, RoochError> {
+        match self {
+            BuiltinScheme::Ed25519 => Ok(String::from(stringify!(Ed25519Validator))),
+            BuiltinScheme::MultiEd25519 => Ok(String::from(stringify!(MultiEd25519Validator))),
+            BuiltinScheme::Ecdsa => Ok(String::from(stringify!(EcdsaK1Validator))),
+            BuiltinScheme::EcdsaRecoverable => {
+                Ok(String::from(stringify!(EcdsaK1RecoverableValidator)))
+            }
+            BuiltinScheme::Schnorr => Ok(String::from(stringify!(SchnorrValidator))),
+        }
+    }
+
+    pub fn create_validator_struct_tag(
+        &self,
+        address: AccountAddress,
+        module_name: String,
+    ) -> Result<Box<StructTag>, RoochError> {
+        let tag_name: String = self.get_validator_name()?;
+
+        Ok(Box::new(StructTag {
+            address,
+            module: Identifier::new(module_name).unwrap(),
+            name: Identifier::new(tag_name).unwrap(),
+            type_params: vec![],
+        }))
     }
 }
 
@@ -83,6 +152,8 @@ impl BuiltinScheme {
 pub enum RoochKeyPair {
     Ed25519(Ed25519KeyPair),
     Ecdsa(Secp256k1KeyPair),
+    EcdsaRecoverable(Secp256k1RecoverableKeyPair),
+    Schnorr(SchnorrKeyPair),
 }
 
 impl RoochKeyPair {
@@ -90,6 +161,8 @@ impl RoochKeyPair {
         match self {
             RoochKeyPair::Ed25519(kp) => PublicKey::Ed25519(kp.public().into()),
             RoochKeyPair::Ecdsa(kp) => PublicKey::Ecdsa(kp.public().into()),
+            RoochKeyPair::EcdsaRecoverable(kp) => PublicKey::EcdsaRecoverable(kp.public().into()),
+            RoochKeyPair::Schnorr(kp) => PublicKey::Schnorr(kp.public().into()),
         }
     }
 }
@@ -99,6 +172,8 @@ impl Signer<Signature> for RoochKeyPair {
         match self {
             RoochKeyPair::Ed25519(kp) => kp.sign(msg),
             RoochKeyPair::Ecdsa(kp) => kp.sign(msg),
+            RoochKeyPair::EcdsaRecoverable(kp) => kp.sign(msg),
+            RoochKeyPair::Schnorr(kp) => kp.sign(msg),
         }
     }
 }
@@ -125,6 +200,12 @@ impl EncodeDecodeBase64 for RoochKeyPair {
             RoochKeyPair::Ecdsa(kp) => {
                 bytes.extend_from_slice(kp.as_bytes());
             }
+            RoochKeyPair::EcdsaRecoverable(kp) => {
+                bytes.extend_from_slice(kp.as_bytes());
+            }
+            RoochKeyPair::Schnorr(kp) => {
+                bytes.extend_from_slice(kp.as_bytes());
+            }
         }
         Base64::encode(&bytes[..])
     }
@@ -132,12 +213,21 @@ impl EncodeDecodeBase64 for RoochKeyPair {
     /// Decode a RoochKeyPair from `flag || privkey` in Base64. The public key is computed directly from the private key bytes.
     fn decode_base64(value: &str) -> Result<Self, eyre::Report> {
         let bytes = Base64::decode(value).map_err(|e| eyre!("{}", e.to_string()))?;
-        match BuiltinScheme::from_flag_byte(bytes.first().ok_or_else(|| eyre!("Invalid length"))?) {
+        match BuiltinScheme::from_flag_byte(*bytes.first().ok_or_else(|| eyre!("Invalid length"))?)
+        {
             Ok(x) => match x {
                 BuiltinScheme::Ed25519 => Ok(RoochKeyPair::Ed25519(Ed25519KeyPair::from_bytes(
                     bytes.get(1..).ok_or_else(|| eyre!("Invalid length"))?,
                 )?)),
                 BuiltinScheme::Ecdsa => Ok(RoochKeyPair::Ecdsa(Secp256k1KeyPair::from_bytes(
+                    bytes.get(1..).ok_or_else(|| eyre!("Invalid length"))?,
+                )?)),
+                BuiltinScheme::EcdsaRecoverable => Ok(RoochKeyPair::EcdsaRecoverable(
+                    Secp256k1RecoverableKeyPair::from_bytes(
+                        bytes.get(1..).ok_or_else(|| eyre!("Invalid length"))?,
+                    )?,
+                )),
+                BuiltinScheme::Schnorr => Ok(RoochKeyPair::Schnorr(SchnorrKeyPair::from_bytes(
                     bytes.get(1..).ok_or_else(|| eyre!("Invalid length"))?,
                 )?)),
                 _ => Err(eyre!("Invalid flag byte")),
@@ -169,10 +259,12 @@ impl<'de> Deserialize<'de> for RoochKeyPair {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, From, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, JsonSchema)]
 pub enum PublicKey {
     Ed25519(Ed25519PublicKeyAsBytes),
     Ecdsa(Secp256k1PublicKeyAsBytes),
+    EcdsaRecoverable(Secp256k1RecoverablePublicKeyAsBytes),
+    Schnorr(SchnorrPublicKeyAsBytes),
 }
 
 impl AsRef<[u8]> for PublicKey {
@@ -180,6 +272,8 @@ impl AsRef<[u8]> for PublicKey {
         match self {
             PublicKey::Ed25519(pk) => &pk.0,
             PublicKey::Ecdsa(pk) => &pk.0,
+            PublicKey::EcdsaRecoverable(pk) => &pk.0,
+            PublicKey::Schnorr(pk) => &pk.0,
         }
     }
 }
@@ -194,7 +288,6 @@ impl EncodeDecodeBase64 for PublicKey {
 
     fn decode_base64(value: &str) -> Result<Self, eyre::Report> {
         let bytes = Base64::decode(value).map_err(|e| eyre!("{}", e.to_string()))?;
-
         match bytes.first() {
             Some(x) => {
                 if x == &BuiltinScheme::Ed25519.flag() {
@@ -207,6 +300,16 @@ impl EncodeDecodeBase64 for PublicKey {
                         bytes.get(1..).ok_or_else(|| eyre!("Invalid length"))?,
                     )?;
                     Ok(PublicKey::Ecdsa((&pk).into()))
+                } else if x == &BuiltinScheme::EcdsaRecoverable.flag() {
+                    let pk = Secp256k1RecoverablePublicKey::from_bytes(
+                        bytes.get(1..).ok_or_else(|| eyre!("Invalid length"))?,
+                    )?;
+                    Ok(PublicKey::Ecdsa((&pk).into()))
+                } else if x == &BuiltinScheme::Schnorr.flag() {
+                    let pk: SchnorrPublicKey = SchnorrPublicKey::from_bytes(
+                        bytes.get(1..).ok_or_else(|| eyre!("Invalid length"))?,
+                    )?;
+                    Ok(PublicKey::Schnorr((&pk).into()))
                 } else {
                     Err(eyre!("Invalid flag byte"))
                 }
@@ -240,7 +343,12 @@ impl<'de> Deserialize<'de> for PublicKey {
 
 impl PublicKey {
     pub fn flag(&self) -> u8 {
-        Ed25519RoochSignature::SCHEME.flag()
+        match self {
+            PublicKey::Ed25519(_) => Ed25519RoochSignature::SCHEME.flag(),
+            PublicKey::Ecdsa(_) => EcdsaRoochSignature::SCHEME.flag(),
+            PublicKey::EcdsaRecoverable(_) => EcdsaRecoverableRoochSignature::SCHEME.flag(),
+            PublicKey::Schnorr(_) => SchnorrRoochSignature::SCHEME.flag(),
+        }
     }
     pub fn try_from_bytes(
         scheme: BuiltinScheme,
@@ -253,14 +361,21 @@ impl PublicKey {
             BuiltinScheme::Ecdsa => Ok(PublicKey::Ecdsa(
                 (&Secp256k1PublicKey::from_bytes(key_bytes)?).into(),
             )),
+            BuiltinScheme::EcdsaRecoverable => Ok(PublicKey::EcdsaRecoverable(
+                (&Secp256k1RecoverablePublicKey::from_bytes(key_bytes)?).into(),
+            )),
+            BuiltinScheme::Schnorr => Ok(PublicKey::Schnorr(
+                (&SchnorrPublicKey::from_bytes(key_bytes)?).into(),
+            )),
             _ => Err(eyre!("Unsupported scheme")),
         }
     }
-
     pub fn scheme(&self) -> BuiltinScheme {
         match self {
             PublicKey::Ed25519(_) => Ed25519RoochSignature::SCHEME,
             PublicKey::Ecdsa(_) => EcdsaRoochSignature::SCHEME,
+            PublicKey::EcdsaRecoverable(_) => EcdsaRecoverableRoochSignature::SCHEME,
+            PublicKey::Schnorr(_) => SchnorrRoochSignature::SCHEME,
         }
     }
 }
@@ -275,6 +390,14 @@ impl RoochPublicKey for Ed25519PublicKey {
 
 impl RoochPublicKey for Secp256k1PublicKey {
     const SIGNATURE_SCHEME: BuiltinScheme = BuiltinScheme::Ecdsa;
+}
+
+impl RoochPublicKey for Secp256k1RecoverablePublicKey {
+    const SIGNATURE_SCHEME: BuiltinScheme = BuiltinScheme::EcdsaRecoverable;
+}
+
+impl RoochPublicKey for SchnorrPublicKey {
+    const SIGNATURE_SCHEME: BuiltinScheme = BuiltinScheme::Schnorr;
 }
 
 impl<T: RoochPublicKey> From<&T> for RoochAddress {
@@ -356,6 +479,8 @@ pub trait RoochSignatureInner: Sized + ToFromBytes + PartialEq + Eq + Hash {
 pub enum Signature {
     Ed25519RoochSignature,
     EcdsaRoochSignature,
+    EcdsaRecoverableRoochSignature,
+    SchnorrRoochSignature,
 }
 
 impl Serialize for Signature {
@@ -429,6 +554,22 @@ impl Signature {
                 })?)
                     .into(),
             )),
+            BuiltinScheme::EcdsaRecoverable => Ok(CompressedSignature::EcdsaRecoverable(
+                (&Secp256k1RecoverableSignature::from_bytes(bytes).map_err(|_| {
+                    RoochError::InvalidSignature {
+                        error: "Cannot parse sig".to_owned(),
+                    }
+                })?)
+                    .into(),
+            )),
+            BuiltinScheme::Schnorr => Ok(CompressedSignature::Schnorr(
+                (&SchnorrSignature::from_bytes(bytes).map_err(|_| {
+                    RoochError::InvalidSignature {
+                        error: "Cannot parse sig".to_owned(),
+                    }
+                })?)
+                    .into(),
+            )),
             _ => Err(RoochError::UnsupportedFeatureError {
                 error: "Unsupported signature scheme in MultiSig".to_owned(),
             }),
@@ -450,6 +591,16 @@ impl Signature {
                     .map_err(|_| RoochError::KeyConversionError("Cannot parse pk".to_owned()))?)
                     .into(),
             )),
+            BuiltinScheme::EcdsaRecoverable => Ok(PublicKey::EcdsaRecoverable(
+                (&Secp256k1RecoverablePublicKey::from_bytes(bytes)
+                    .map_err(|_| RoochError::KeyConversionError("Cannot parse pk".to_owned()))?)
+                    .into(),
+            )),
+            BuiltinScheme::Schnorr => Ok(PublicKey::Schnorr(
+                (&SchnorrPublicKey::from_bytes(bytes)
+                    .map_err(|_| RoochError::KeyConversionError("Cannot parse pk".to_owned()))?)
+                    .into(),
+            )),
             _ => Err(RoochError::UnsupportedFeatureError {
                 error: "Unsupported signature scheme in MultiSig".to_owned(),
             }),
@@ -462,6 +613,8 @@ impl AsRef<[u8]> for Signature {
         match self {
             Signature::Ed25519RoochSignature(sig) => sig.as_ref(),
             Signature::EcdsaRoochSignature(sig) => sig.as_ref(),
+            Signature::EcdsaRecoverableRoochSignature(sig) => sig.as_ref(),
+            Signature::SchnorrRoochSignature(sig) => sig.as_ref(),
         }
     }
 }
@@ -470,6 +623,8 @@ impl AsMut<[u8]> for Signature {
         match self {
             Signature::Ed25519RoochSignature(sig) => sig.as_mut(),
             Signature::EcdsaRoochSignature(sig) => sig.as_mut(),
+            Signature::EcdsaRecoverableRoochSignature(sig) => sig.as_mut(),
+            Signature::SchnorrRoochSignature(sig) => sig.as_mut(),
         }
     }
 }
@@ -482,6 +637,10 @@ impl ToFromBytes for Signature {
                     Ok(<Ed25519RoochSignature as ToFromBytes>::from_bytes(bytes)?.into())
                 } else if x == &EcdsaRoochSignature::SCHEME.flag() {
                     Ok(<EcdsaRoochSignature as ToFromBytes>::from_bytes(bytes)?.into())
+                } else if x == &EcdsaRecoverableRoochSignature::SCHEME.flag() {
+                    Ok(<EcdsaRecoverableRoochSignature as ToFromBytes>::from_bytes(bytes)?.into())
+                } else if x == &SchnorrRoochSignature::SCHEME.flag() {
+                    Ok(<SchnorrRoochSignature as ToFromBytes>::from_bytes(bytes)?.into())
                 } else {
                     Err(FastCryptoError::InvalidInput)
                 }
@@ -496,6 +655,8 @@ impl ToFromBytes for Signature {
 pub enum CompressedSignature {
     Ed25519(Ed25519SignatureAsBytes),
     Ecdsa(Secp256k1SignatureAsBytes),
+    EcdsaRecoverable(Secp256k1RecoverableSignatureAsBytes),
+    Schnorr(SchnorrSignatureAsBytes),
 }
 
 impl AsRef<[u8]> for CompressedSignature {
@@ -503,6 +664,8 @@ impl AsRef<[u8]> for CompressedSignature {
         match self {
             CompressedSignature::Ed25519(sig) => &sig.0,
             CompressedSignature::Ecdsa(sig) => &sig.0,
+            CompressedSignature::EcdsaRecoverable(sig) => &sig.0,
+            CompressedSignature::Schnorr(sig) => &sig.0,
         }
     }
 }
@@ -632,6 +795,88 @@ impl Signer<Signature> for Secp256k1KeyPair {
     }
 }
 
+//
+// EcdsaRecoverable Rooch Signature port
+//
+#[serde_as]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash, AsRef, AsMut)]
+#[as_ref(forward)]
+#[as_mut(forward)]
+pub struct EcdsaRecoverableRoochSignature(
+    #[schemars(with = "Base64")]
+    #[serde_as(as = "Readable<Base64, Bytes>")]
+    [u8; Secp256k1RecoverablePublicKey::LENGTH + Secp256k1RecoverableSignature::LENGTH + 1],
+);
+
+impl RoochSignatureInner for EcdsaRecoverableRoochSignature {
+    type Sig = Secp256k1RecoverableSignature;
+    type PubKey = Secp256k1RecoverablePublicKey;
+    type KeyPair = Secp256k1RecoverableKeyPair;
+    const LENGTH: usize =
+        Secp256k1RecoverablePublicKey::LENGTH + Secp256k1RecoverableSignature::LENGTH + 1;
+}
+
+impl ToFromBytes for EcdsaRecoverableRoochSignature {
+    fn from_bytes(bytes: &[u8]) -> Result<Self, FastCryptoError> {
+        if bytes.len() != Self::LENGTH {
+            return Err(FastCryptoError::InputLengthWrong(Self::LENGTH));
+        }
+        let mut sig_bytes = [0; Self::LENGTH];
+        sig_bytes.copy_from_slice(bytes);
+        Ok(Self(sig_bytes))
+    }
+}
+
+impl Signer<Signature> for Secp256k1RecoverableKeyPair {
+    fn sign(&self, msg: &[u8]) -> Signature {
+        EcdsaRecoverableRoochSignature::new(self, msg).into()
+    }
+}
+
+//
+// Schnorr Rooch Signature port
+//
+#[serde_as]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash, AsRef, AsMut)]
+#[as_ref(forward)]
+#[as_mut(forward)]
+pub struct SchnorrRoochSignature(
+    #[schemars(with = "Base64")]
+    #[serde_as(as = "Readable<Base64, Bytes>")]
+    [u8; SchnorrPublicKey::LENGTH + SchnorrSignature::LENGTH + 1],
+);
+
+// Implementation useful for simplify testing when mock signature is needed
+impl Default for SchnorrRoochSignature {
+    fn default() -> Self {
+        Self([0; SchnorrPublicKey::LENGTH + SchnorrSignature::LENGTH + 1])
+    }
+}
+
+impl ToFromBytes for SchnorrRoochSignature {
+    fn from_bytes(bytes: &[u8]) -> Result<Self, FastCryptoError> {
+        if bytes.len() != Self::LENGTH {
+            return Err(FastCryptoError::InputLengthWrong(Self::LENGTH));
+        }
+        let mut sig_bytes = [0; Self::LENGTH];
+        sig_bytes.copy_from_slice(bytes);
+        Ok(Self(sig_bytes))
+    }
+}
+
+impl Signer<Signature> for SchnorrKeyPair {
+    fn sign(&self, msg: &[u8]) -> Signature {
+        SchnorrRoochSignature::new(self, msg).into()
+    }
+}
+
+impl RoochSignatureInner for SchnorrRoochSignature {
+    type Sig = SchnorrSignature;
+    type PubKey = SchnorrPublicKey;
+    type KeyPair = SchnorrKeyPair;
+    const LENGTH: usize = SchnorrPublicKey::LENGTH + SchnorrSignature::LENGTH + 1;
+}
+
 /// Generate a keypair from the specified RNG (useful for testing with seedable rngs).
 pub fn get_key_pair_from_rng<KP: KeypairTraits, R>(csprng: &mut R) -> (RoochAddress, KP)
 where
@@ -647,21 +892,60 @@ mod tests {
     use crate::address::RoochAddress;
     use fastcrypto::{
         ed25519::{Ed25519KeyPair, Ed25519PrivateKey},
+        secp256k1::schnorr::{SchnorrKeyPair, SchnorrPrivateKey},
+        secp256k1::{
+            recoverable::{Secp256k1RecoverableKeyPair, Secp256k1RecoverablePrivateKey},
+            Secp256k1KeyPair, Secp256k1PrivateKey,
+        },
         traits::{KeyPair, ToFromBytes},
     };
 
     // this test ensure the public key to address keep the same as the old version
     // we should also keep the public key to address algorithm the same as the move version
     #[test]
-    fn test_public_key_to_address() {
+    fn test_ed25519_public_key_to_address() {
         let private_key = Ed25519PrivateKey::from_bytes(&[0u8; 32]).unwrap();
         let keypair: Ed25519KeyPair = private_key.into();
-        //println!("public_key: {}", hex::encode(keypair.public().as_bytes()));
         let address: RoochAddress = keypair.public().into();
-        //println!("address: {:?}", address);
         assert_eq!(
             address.to_string(),
             "0x7a1378aafadef8ce743b72e8b248295c8f61c102c94040161146ea4d51a182b6"
+        );
+    }
+
+    // this test is to ensure that the other algorithms work for public key to address as well as ed25519
+    #[test]
+    fn test_ecdsa_k1_public_key_to_address() {
+        let private_key = Secp256k1PrivateKey::from_bytes(&[1u8; 32]).unwrap(); // use 1u8.
+        let keypair: Secp256k1KeyPair = private_key.into();
+        let address: RoochAddress = keypair.public().into();
+        assert_eq!(
+            address.to_string(),
+            "0x92718e81a52369b4bc3169161737318ddf022945391a69263e8d4289c79a0c67"
+        );
+    }
+
+    // this test is to ensure that the other algorithms work for public key to address as well as ed25519
+    #[test]
+    fn test_ecdsa_k1_recoverable_public_key_to_address() {
+        let private_key = Secp256k1RecoverablePrivateKey::from_bytes(&[1u8; 32]).unwrap(); // use 1u8.
+        let keypair: Secp256k1RecoverableKeyPair = private_key.into();
+        let address: RoochAddress = keypair.public().into();
+        assert_eq!(
+            address.to_string(),
+            "0x8c891976da9498ec1d3ff778a5d6c40c217d63cc8c48539c959f8b683eedf5a4"
+        );
+    }
+
+    // this test is to ensure that the other algorithms work for public key to address as well as ed25519
+    #[test]
+    fn test_schnorr_public_key_to_address() {
+        let private_key = SchnorrPrivateKey::from_bytes(&[1u8; 32]).unwrap(); // ensure not leave 0, use 1u8
+        let keypair: SchnorrKeyPair = private_key.into();
+        let address: RoochAddress = keypair.public().into();
+        assert_eq!(
+            address.to_string(),
+            "0xa519b36bbecc294726bbfd962ab46ca4e09baacca7cd90d5d2da2331afb363e6"
         );
     }
 }

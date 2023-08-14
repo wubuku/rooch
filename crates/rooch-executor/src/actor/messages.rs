@@ -82,6 +82,28 @@ impl Message for AnnotatedStatesMessage {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct ListStatesMessage {
+    pub access_path: AccessPath,
+    pub cursor: Option<Vec<u8>>,
+    pub limit: usize,
+}
+
+impl Message for ListStatesMessage {
+    type Result = Result<Vec<Option<(Vec<u8>, State)>>>;
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ListAnnotatedStatesMessage {
+    pub access_path: AccessPath,
+    pub cursor: Option<Vec<u8>>,
+    pub limit: usize,
+}
+
+impl Message for ListAnnotatedStatesMessage {
+    type Result = Result<Vec<Option<(Vec<u8>, AnnotatedState)>>>;
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct GetEventsByEventHandleMessage {
     pub event_handle_type: StructTag,
     pub cursor: Option<u64>,

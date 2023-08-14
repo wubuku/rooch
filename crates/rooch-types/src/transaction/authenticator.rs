@@ -9,11 +9,14 @@
 
 use crate::crypto::{BuiltinScheme, Signature};
 use anyhow::Result;
-
-#[cfg(any(test, feature = "fuzzing"))]
-use ethers::types::U256;
 #[cfg(any(test, feature = "fuzzing"))]
 use fastcrypto::ed25519::Ed25519KeyPair;
+#[cfg(any(test, feature = "fuzzing"))]
+use fastcrypto::secp256k1::recoverable::Secp256k1RecoverableKeyPair;
+#[cfg(any(test, feature = "fuzzing"))]
+use fastcrypto::secp256k1::schnorr::SchnorrKeyPair;
+#[cfg(any(test, feature = "fuzzing"))]
+use fastcrypto::secp256k1::Secp256k1KeyPair;
 #[cfg(any(test, feature = "fuzzing"))]
 use fastcrypto::traits::KeyPair;
 #[cfg(any(test, feature = "fuzzing"))]
@@ -21,7 +24,7 @@ use proptest::{collection::vec, prelude::*};
 #[cfg(any(test, feature = "fuzzing"))]
 use rand::{rngs::StdRng, SeedableRng};
 use serde::{Deserialize, Serialize};
-use std::{convert::TryFrom, fmt, str::FromStr};
+use std::{fmt, str::FromStr};
 
 /// A `Authenticator` is an an abstraction of a account authenticator.
 /// It is a part of `AccountAbstraction`
@@ -67,11 +70,47 @@ prop_compose! {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SchnorrAuthenticator {
+    pub signature: Signature,
+}
+
+impl BuiltinAuthenticator for SchnorrAuthenticator {
+    fn scheme(&self) -> BuiltinScheme {
+        BuiltinScheme::Schnorr
+    }
+    fn payload(&self) -> Vec<u8> {
+        self.signature.as_ref().to_vec()
+    }
+}
+#[cfg(any(test, feature = "fuzzing"))]
+impl Arbitrary for SchnorrAuthenticator {
+    type Parameters = ();
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        arb_schnorr_authenticator().boxed()
+    }
+    type Strategy = BoxedStrategy<Self>;
+}
+
+#[cfg(any(test, feature = "fuzzing"))]
+prop_compose! {
+    fn arb_schnorr_authenticator()(
+        seed in any::<u64>(),
+        message in vec(any::<u8>(), 32)
+    ) -> SchnorrAuthenticator {
+        let mut rng = StdRng::seed_from_u64(seed);
+        let kp = SchnorrKeyPair::generate(&mut rng);
+        SchnorrAuthenticator {
+            signature: Signature::new_hashed(&message, &kp)
+        }
+    }
+}
+
 // TODO: MultiEd25519
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EcdsaAuthenticator {
-    pub signature: ethers::core::types::Signature,
+    pub signature: Signature,
 }
 
 impl BuiltinAuthenticator for EcdsaAuthenticator {
@@ -79,41 +118,7 @@ impl BuiltinAuthenticator for EcdsaAuthenticator {
         BuiltinScheme::Ecdsa
     }
     fn payload(&self) -> Vec<u8> {
-        self.signature.to_vec()
-    }
-}
-
-impl Serialize for EcdsaAuthenticator {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        #[derive(::serde::Serialize)]
-        #[serde(rename = "EcdsaAuthenticator")]
-        struct Value {
-            signature: Vec<u8>,
-        }
-        Value {
-            signature: self.signature.to_vec(),
-        }
-        .serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for EcdsaAuthenticator {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(::serde::Deserialize)]
-        #[serde(rename = "EcdsaAuthenticator")]
-        struct Value {
-            signature: Vec<u8>,
-        }
-        let value = Value::deserialize(deserializer)?;
-        let signature = ethers::core::types::Signature::try_from(value.signature.as_slice())
-            .map_err(|e| serde::de::Error::custom(e.to_string()))?;
-        Ok(EcdsaAuthenticator { signature })
+        self.signature.as_ref().to_vec()
     }
 }
 
@@ -129,13 +134,50 @@ impl Arbitrary for EcdsaAuthenticator {
 #[cfg(any(test, feature = "fuzzing"))]
 prop_compose! {
     fn arb_ecdsa_authenticator()(
-     r in vec(any::<u64>(), 4..=4).prop_map(|v| U256(v.try_into().unwrap())),
-     s in vec(any::<u64>(), 4..=4).prop_map(|v| U256(v.try_into().unwrap())),
-     // Although v is an u64 type, it is actually an u8 value.
-     v in any::<u8>().prop_map(<u64>::from),
+     seed in any::<u64>(),
+     message in vec(any::<u8>(), 1..1000),
     ) -> EcdsaAuthenticator {
+        let mut rng = StdRng::seed_from_u64(seed);
+        let kp = Secp256k1KeyPair::generate(&mut rng);
         EcdsaAuthenticator {
-            signature: ethers::core::types::Signature {r, s, v},
+            signature: Signature::new_hashed(&message, &kp)
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct EcdsaRecoverableAuthenticator {
+    pub signature: Signature,
+}
+
+impl BuiltinAuthenticator for EcdsaRecoverableAuthenticator {
+    fn scheme(&self) -> BuiltinScheme {
+        BuiltinScheme::EcdsaRecoverable
+    }
+    fn payload(&self) -> Vec<u8> {
+        self.signature.as_ref().to_vec()
+    }
+}
+
+#[cfg(any(test, feature = "fuzzing"))]
+impl Arbitrary for EcdsaRecoverableAuthenticator {
+    type Parameters = ();
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        arb_ecdsa_recoverable_authenticator().boxed()
+    }
+    type Strategy = BoxedStrategy<Self>;
+}
+
+#[cfg(any(test, feature = "fuzzing"))]
+prop_compose! {
+    fn arb_ecdsa_recoverable_authenticator()(
+     seed in any::<u64>(),
+     message in vec(any::<u8>(), 1..1000),
+    ) -> EcdsaRecoverableAuthenticator {
+        let mut rng = StdRng::seed_from_u64(seed);
+        let kp = Secp256k1RecoverableKeyPair::generate(&mut rng);
+        EcdsaRecoverableAuthenticator {
+            signature: Signature::new_hashed(&message, &kp)
         }
     }
 }
@@ -155,8 +197,10 @@ impl From<Signature> for Authenticator {
     fn from(sign: Signature) -> Self {
         match sign.to_public_key().unwrap().scheme() {
             BuiltinScheme::Ed25519 => Authenticator::ed25519(sign),
-            BuiltinScheme::Ecdsa => todo!(),
+            BuiltinScheme::Ecdsa => Authenticator::ecdsa(sign),
+            BuiltinScheme::EcdsaRecoverable => Authenticator::ecdsa_recoverable(sign),
             BuiltinScheme::MultiEd25519 => todo!(),
+            BuiltinScheme::Schnorr => Authenticator::schnorr(sign),
         }
     }
 }
@@ -179,8 +223,18 @@ impl Authenticator {
     }
 
     /// Create a single-signature ecdsa authenticator
-    pub fn ecdsa(signature: ethers::core::types::Signature) -> Self {
+    pub fn ecdsa(signature: Signature) -> Self {
         EcdsaAuthenticator { signature }.into()
+    }
+
+    /// Create a single-signature ecdsa recoverable authenticator
+    pub fn ecdsa_recoverable(signature: Signature) -> Self {
+        EcdsaRecoverableAuthenticator { signature }.into()
+    }
+
+    /// Create a single-signature schnorr authenticator
+    pub fn schnorr(signature: Signature) -> Self {
+        SchnorrAuthenticator { signature }.into()
     }
 
     /// Create a custom authenticator
@@ -223,9 +277,23 @@ mod tests {
         }
 
         #[test]
+        fn test_ecdsa_recoverable_authenticator_serialize_deserialize(authenticator in any::<super::EcdsaRecoverableAuthenticator>()) {
+            let serialized = serde_json::to_string(&authenticator).unwrap();
+            let deserialized: super:: EcdsaRecoverableAuthenticator = serde_json::from_str(&serialized).unwrap();
+            assert_eq!(authenticator.signature, deserialized.signature);
+        }
+
+        #[test]
         fn test_ed25519_authenticator_serialize_deserialize(authenticator in any::<super::Ed25519Authenticator>()) {
             let serialized = serde_json::to_string(&authenticator).unwrap();
             let deserialized: super::Ed25519Authenticator = serde_json::from_str(&serialized).unwrap();
+            assert_eq!(authenticator.signature, deserialized.signature);
+        }
+
+        #[test]
+        fn test_schnorr_authenticator_serialize_deserialize(authenticator in any::<super::SchnorrAuthenticator>()) {
+            let serialized = serde_json::to_string(&authenticator).unwrap();
+            let deserialized: super::SchnorrAuthenticator = serde_json::from_str(&serialized).unwrap();
             assert_eq!(authenticator.signature, deserialized.signature);
         }
     }

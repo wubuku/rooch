@@ -3,7 +3,10 @@
 
 use crate::cli_types::CommandAction;
 use async_trait::async_trait;
-use commands::{create::CreateCommand, import::ImportCommand, list::ListCommand};
+use commands::{
+    create::CreateCommand, import::ImportCommand, list::ListCommand, nullify::NullifyCommand,
+    switch::SwitchCommand, update::UpdateCommand,
+};
 use rooch_types::error::{RoochError, RoochResult};
 use std::path::PathBuf;
 
@@ -17,8 +20,6 @@ pub struct Account {
     /// Sets the file storing the state of our user accounts (an empty one will be created if missing)
     #[clap(long = "client.config")]
     config: Option<PathBuf>,
-    #[clap(short = 'y', long = "yes")]
-    accept_defaults: bool,
 }
 
 #[async_trait]
@@ -30,6 +31,9 @@ impl CommandAction<String> for Account {
             }),
             AccountCommand::List(list) => list.execute().await.map(|_| "".to_owned()),
             AccountCommand::Import(import) => import.execute().await.map(|_| "".to_owned()),
+            AccountCommand::Switch(switch) => switch.execute().await.map(|_| "".to_owned()),
+            AccountCommand::Update(update) => update.execute().await.map(|_| "".to_owned()),
+            AccountCommand::Nullify(nullify) => nullify.execute().await.map(|_| "".to_owned()),
         }
         .map_err(RoochError::from)
     }
@@ -41,4 +45,7 @@ pub enum AccountCommand {
     Create(CreateCommand),
     List(ListCommand),
     Import(ImportCommand),
+    Switch(SwitchCommand),
+    Update(UpdateCommand),
+    Nullify(NullifyCommand),
 }

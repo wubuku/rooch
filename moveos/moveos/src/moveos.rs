@@ -12,12 +12,14 @@ use move_core_types::{
 use move_vm_runtime::config::VMConfig;
 use move_vm_runtime::native_functions::NativeFunction;
 use move_vm_types::gas::UnmeteredGasMeter;
-use moveos_store::transaction_store::TransactionDB;
-use moveos_store::MoveOSDB;
-use moveos_store::{event_store::EventStore, state_store::StateDB};
+use moveos_store::config_store::ConfigStore;
+use moveos_store::event_store::EventDBStore;
+use moveos_store::state_store::statedb::StateDBStore;
+use moveos_store::transaction_store::TransactionDBStore;
+use moveos_store::MoveOSStore;
 use moveos_types::function_return_value::FunctionReturnValue;
 use moveos_types::module_binding::MoveFunctionCaller;
-use moveos_types::move_types::FunctionId;
+use moveos_types::startup_info::StartupInfo;
 use moveos_types::state_resolver::MoveOSResolverProxy;
 use moveos_types::transaction::{MoveOSTransaction, TransactionOutput, VerifiedMoveOSTransaction};
 use moveos_types::tx_context::TxContext;
@@ -25,10 +27,6 @@ use moveos_types::{h256::H256, transaction::FunctionCall};
 
 pub struct MoveOSConfig {
     pub vm_config: VMConfig,
-    /// if the pre_execute_function is set, the MoveOS will call the function before the transaction is executed.
-    pub pre_execute_function: Option<FunctionId>,
-    /// if the post_execute_function is set, the MoveOS will call the function after the transaction is executed.
-    pub post_execute_function: Option<FunctionId>,
 }
 
 impl std::fmt::Debug for MoveOSConfig {
@@ -42,8 +40,6 @@ impl std::fmt::Debug for MoveOSConfig {
                 "vm_config.paranoid_type_checks",
                 &self.vm_config.paranoid_type_checks,
             )
-            .field("pre_execute_function", &self.pre_execute_function)
-            .field("post_execute_function", &self.post_execute_function)
             .finish()
     }
 }
@@ -57,29 +53,22 @@ impl Clone for MoveOSConfig {
                 max_binary_format_version: self.vm_config.max_binary_format_version,
                 paranoid_type_checks: self.vm_config.paranoid_type_checks,
             },
-            pre_execute_function: self.pre_execute_function.clone(),
-            post_execute_function: self.post_execute_function.clone(),
         }
     }
 }
 
 pub struct MoveOS {
     vm: MoveOSVM,
-    db: MoveOSResolverProxy<MoveOSDB>,
+    db: MoveOSResolverProxy<MoveOSStore>,
 }
 
 impl MoveOS {
     pub fn new(
-        db: MoveOSDB,
+        db: MoveOSStore,
         natives: impl IntoIterator<Item = (AccountAddress, Identifier, Identifier, NativeFunction)>,
         config: MoveOSConfig,
     ) -> Result<Self> {
-        let vm = MoveOSVM::new(
-            natives,
-            config.vm_config,
-            config.pre_execute_function,
-            config.post_execute_function,
-        )?;
+        let vm = MoveOSVM::new(natives, config.vm_config)?;
         Ok(Self {
             vm,
             db: MoveOSResolverProxy(db),
@@ -101,7 +90,12 @@ impl MoveOS {
     }
 
     fn verify_and_execute_genesis_tx(&mut self, tx: MoveOSTransaction) -> Result<()> {
-        let MoveOSTransaction { ctx, action } = tx;
+        let MoveOSTransaction {
+            ctx,
+            action,
+            pre_execute_functions: _,
+            post_execute_functions: _,
+        } = tx;
 
         let mut session = self.vm.new_genesis_session(&self.db, ctx);
         let verified_action = session.verify_move_action(action)?;
@@ -115,24 +109,29 @@ impl MoveOS {
         Ok(())
     }
 
-    pub fn state(&self) -> &StateDB {
+    pub fn state(&self) -> &StateDBStore {
         self.db.0.get_state_store()
     }
 
-    pub fn moveos_resolver(&self) -> &MoveOSResolverProxy<MoveOSDB> {
+    pub fn moveos_resolver(&self) -> &MoveOSResolverProxy<MoveOSStore> {
         &self.db
     }
 
-    pub fn event_store(&self) -> &EventStore {
+    pub fn event_store(&self) -> &EventDBStore {
         self.db.0.get_event_store()
     }
 
-    pub fn transaction_store(&self) -> &TransactionDB {
+    pub fn transaction_store(&self) -> &TransactionDBStore {
         self.db.0.get_transaction_store()
     }
 
     pub fn verify(&self, tx: MoveOSTransaction) -> Result<VerifiedMoveOSTransaction> {
-        let MoveOSTransaction { ctx, action } = tx;
+        let MoveOSTransaction {
+            ctx,
+            action,
+            pre_execute_functions,
+            post_execute_functions,
+        } = tx;
 
         let gas_meter = UnmeteredGasMeter;
         let session = self
@@ -144,11 +143,18 @@ impl MoveOS {
         Ok(VerifiedMoveOSTransaction {
             ctx,
             action: verified_action,
+            pre_execute_functions,
+            post_execute_functions,
         })
     }
 
-    pub fn execute(&mut self, tx: VerifiedMoveOSTransaction) -> Result<(H256, TransactionOutput)> {
-        let VerifiedMoveOSTransaction { ctx, action } = tx;
+    pub fn execute(&self, tx: VerifiedMoveOSTransaction) -> Result<TransactionOutput> {
+        let VerifiedMoveOSTransaction {
+            ctx,
+            action,
+            pre_execute_functions,
+            post_execute_functions,
+        } = tx;
         let tx_hash = ctx.tx_hash();
         if log::log_enabled!(log::Level::Debug) {
             log::debug!(
@@ -160,18 +166,32 @@ impl MoveOS {
         }
         //TODO define the gas meter.
         let gas_meter = UnmeteredGasMeter;
-        let mut session = self.vm.new_session(&self.db, ctx, gas_meter);
+        let mut session = self.vm.new_session(
+            &self.db,
+            ctx,
+            pre_execute_functions,
+            post_execute_functions,
+            gas_meter,
+        );
         let execute_result = session.execute_move_action(action);
         if execute_result.is_err() {
             log::warn!("execute tx({}) error: {:?}", tx_hash, execute_result);
         }
         let vm_status = vm_status_of_result(execute_result);
         let (_ctx, output) = session.finish_with_extensions(vm_status)?;
+        Ok(output)
+    }
+
+    pub fn execute_and_apply(
+        &mut self,
+        tx: VerifiedMoveOSTransaction,
+    ) -> Result<(H256, TransactionOutput)> {
+        let output = self.execute(tx)?;
         let state_root = self.apply_transaction_output(output.clone())?;
         Ok((state_root, output))
     }
 
-    fn apply_transaction_output(&self, output: TransactionOutput) -> Result<H256> {
+    fn apply_transaction_output(&mut self, output: TransactionOutput) -> Result<H256> {
         //TODO move apply change set to a suitable place, and make MoveOS stateless?
         let TransactionOutput {
             status: _,
@@ -180,7 +200,6 @@ impl MoveOS {
             events,
             gas_used: _,
         } = output;
-
         let new_state_root = self
             .db
             .0
@@ -200,6 +219,15 @@ impl MoveOS {
                     .with_message(e.to_string())
                     .finish(Location::Undefined)
             })?;
+        self.db
+            .0
+            .get_config_store()
+            .save_startup_info(StartupInfo::new(new_state_root))
+            .map_err(|e| {
+                PartialVMError::new(StatusCode::STORAGE_ERROR)
+                    .with_message(e.to_string())
+                    .finish(Location::Undefined)
+            })?;
         Ok(new_state_root)
     }
 
@@ -208,9 +236,8 @@ impl MoveOS {
         &self,
         function_call: FunctionCall,
     ) -> Result<Vec<FunctionReturnValue>> {
-        //TODO allow user to specify the sender and hash
-        //View function use a fix address and fix hash
-        let tx_context = TxContext::new(AccountAddress::ZERO, H256::zero());
+        //TODO allow user to specify the sender
+        let tx_context = TxContext::new_readonly_ctx(AccountAddress::ZERO);
         //TODO verify the view function
         self.execute_readonly_function(&tx_context, function_call)
     }

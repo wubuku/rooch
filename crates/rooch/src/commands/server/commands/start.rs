@@ -11,6 +11,7 @@ use tokio::signal::ctrl_c;
 use tokio::signal::unix::{signal, SignalKind};
 use tracing::info;
 
+/// Start service
 #[derive(Debug, Parser)]
 pub struct StartCommand;
 
@@ -18,7 +19,7 @@ pub struct StartCommand;
 impl CommandAction<()> for StartCommand {
     async fn execute(self) -> RoochResult<()> {
         let mut service = Service::new();
-        service.start().await.map_err(RoochError::from)?;
+        service.start(false).await.map_err(RoochError::from)?;
 
         #[cfg(unix)]
         {

@@ -5,7 +5,7 @@ module rooch_framework::multi_ed25519_validator {
    
    const SCHEME_MULTIED25519: u64 = 1;
 
-   struct MultiEd25519Validator has store{
+   struct MultiEd25519Validator has store, drop {
    }
 
    public fun scheme(): u64 {
@@ -17,4 +17,13 @@ module rooch_framework::multi_ed25519_validator {
       abort std::error::not_implemented(1)
    }
 
+   fun pre_execute(
+        _ctx: &mut StorageContext,
+   ) { 
+   }
+   
+   fun post_execute(
+      _ctx: &mut StorageContext,
+   ) {
+   }
 }
