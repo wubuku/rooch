@@ -5,10 +5,9 @@ use super::{
     data_cache::{into_change_set, MoveosDataCache},
     tx_argument_resolver::TxArgumentResolver,
 };
-use anyhow::ensure;
 use move_binary_format::{
     compatibility::Compatibility,
-    errors::{Location, VMError, VMResult},
+    errors::{Location, PartialVMError, VMError, VMResult},
     file_format::AbilitySet,
     CompiledModule,
 };
@@ -18,7 +17,7 @@ use move_core_types::{
     identifier::Identifier,
     language_storage::{ModuleId, TypeTag},
     value::MoveTypeLayout,
-    vm_status::{KeptVMStatus, VMStatus},
+    vm_status::{KeptVMStatus, StatusCode, VMStatus},
 };
 use move_vm_runtime::{
     config::VMConfig,
@@ -32,7 +31,10 @@ use move_vm_types::{
     gas::{GasMeter, UnmeteredGasMeter},
     loaded_data::runtime_types::{CachedStructIndex, StructType, Type},
 };
-use moveos_stdlib::natives::moveos_stdlib::raw_table::{NativeTableContext, TableData};
+use moveos_stdlib::natives::moveos_stdlib::{
+    move_module::NativeModuleContext,
+    raw_table::{NativeTableContext, TableData},
+};
 use moveos_types::{
     event::{Event, EventID},
     function_return_value::FunctionReturnValue,
@@ -181,6 +183,7 @@ where
         let mut extensions = NativeContextExtensions::default();
 
         extensions.add(NativeTableContext::new(remote, table_data.clone()));
+        extensions.add(NativeModuleContext::new(remote));
 
         // The VM code loader has bugs around module upgrade. After a module upgrade, the internal
         // cache needs to be flushed to work around those bugs.
@@ -252,7 +255,7 @@ where
     /// Once we start executing transactions, we must ensure that the transaction execution has a result, regardless of success or failure,
     /// and we need to save the result and deduct gas
     pub fn execute_move_action(&mut self, action: VerifiedMoveAction) -> VMResult<()> {
-        match action {
+        let action_result = match action {
             VerifiedMoveAction::Script { call } => {
                 let loaded_function = self
                     .session
@@ -317,6 +320,24 @@ where
                 )?;
                 self.execute_init_modules(init_function_modules)
             }
+        };
+
+        self.resolve_pending_init_functions()?;
+
+        action_result
+    }
+
+    /// Resolve pending init functions request registered via the NativeModuleContext.
+    fn resolve_pending_init_functions(&mut self) -> VMResult<()> {
+        let ctx = self
+            .session
+            .get_native_extensions_mut()
+            .get_mut::<NativeModuleContext>();
+        let init_functions = ctx.init_functions.clone();
+        if !init_functions.is_empty() {
+            self.execute_init_modules(init_functions)
+        } else {
+            Ok(())
         }
     }
 
@@ -409,7 +430,7 @@ where
     pub fn finish_with_extensions(
         self,
         vm_status: VMStatus,
-    ) -> Result<(TxContext, TransactionOutput), anyhow::Error> {
+    ) -> VMResult<(TxContext, TransactionOutput)> {
         let (finalized_session, status) = match vm_status.keep_or_discard() {
             Ok(status) => self.post_execute(status),
             Err(discard_status) => {
@@ -437,22 +458,29 @@ where
             into_change_set(table_data).map_err(|e| e.finish(Location::Undefined))?;
 
         if read_only {
-            ensure!(
-                changeset.accounts().is_empty(),
-                "ChangeSet should be empty as never used."
-            );
-            ensure!(
-                raw_events.is_empty(),
-                "Events should be empty when execute readonly function"
-            );
-            ensure!(
-                state_changeset.changes.is_empty(),
-                "Table change set should be empty when execute readonly function"
-            );
-            ensure!(
-                ctx.tx_context.ids_created == 0,
-                "ids_created should be zero when execute readonly function"
-            );
+            if !changeset.accounts().is_empty() {
+                return Err(PartialVMError::new(StatusCode::UNKNOWN_VALIDATION_STATUS)
+                    .with_message("ChangeSet should be empty as never used.".to_owned())
+                    .finish(Location::Undefined));
+            }
+
+            if !raw_events.is_empty() {
+                return Err(PartialVMError::new(StatusCode::UNKNOWN_VALIDATION_STATUS)
+                    .with_message("Events should be empty as never used.".to_owned())
+                    .finish(Location::Undefined));
+            }
+
+            if !state_changeset.changes.is_empty() {
+                return Err(PartialVMError::new(StatusCode::UNKNOWN_VALIDATION_STATUS)
+                    .with_message("Table change set should be empty as never used.".to_owned())
+                    .finish(Location::Undefined));
+            }
+
+            if ctx.tx_context.ids_created > 0 {
+                return Err(PartialVMError::new(StatusCode::UNKNOWN_VALIDATION_STATUS)
+                    .with_message("TxContext::ids_created should be zero as never used.".to_owned())
+                    .finish(Location::Undefined));
+            }
         }
 
         let events = raw_events
@@ -483,11 +511,18 @@ where
         // this ensure via the check in new_session
         let mut pre_execute_session = self;
         for function_call in pre_execute_session.pre_execute_functions.clone() {
-            //TODO handle pre_execute function error
-            //Because if we allow user to write pre_execute function, we need to handle the error
-            pre_execute_session
-                .execute_function_bypass_visibility(function_call)
-                .expect("pre_execute function should always success");
+            let pre_execute_function_id = function_call.function_id.clone();
+            let result = pre_execute_session.execute_function_bypass_visibility(function_call);
+            if let Err(e) = result {
+                //TODO handle pre_execute function error
+                //Because if we allow user to write pre_execute function, we need to handle the error
+                log::error!(
+                    "pre_execute function {} error: {:?}",
+                    pre_execute_function_id,
+                    e
+                );
+                panic!("pre_execute function should success")
+            }
         }
         pre_execute_session
     }

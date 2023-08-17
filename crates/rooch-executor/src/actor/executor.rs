@@ -10,6 +10,7 @@ use crate::actor::messages::{
     GetTransactionInfosByTxHashMessage, GetTxSeqMappingByTxOrderMessage,
     ListAnnotatedStatesMessage, ListStatesMessage,
 };
+use accumulator::inmemory::InMemoryAccumulator;
 use anyhow::bail;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -17,11 +18,11 @@ use coerce::actor::{context::ActorContext, message::Handler, Actor};
 use move_core_types::account_address::AccountAddress;
 use move_resource_viewer::MoveValueAnnotator;
 use moveos::moveos::MoveOS;
-use moveos_common::accumulator::InMemoryAccumulator;
 use moveos_store::transaction_store::TransactionStore;
 use moveos_store::MoveOSStore;
 use moveos_types::event::AnnotatedMoveOSEvent;
 use moveos_types::event::EventHandle;
+use moveos_types::function_return_value::AnnotatedFunctionResult;
 use moveos_types::function_return_value::AnnotatedFunctionReturnValue;
 use moveos_types::module_binding::MoveFunctionCaller;
 use moveos_types::move_types::as_struct_tag;
@@ -31,13 +32,13 @@ use moveos_types::transaction::FunctionCall;
 use moveos_types::transaction::TransactionExecutionInfo;
 use moveos_types::transaction::VerifiedMoveOSTransaction;
 use moveos_types::tx_context::TxContext;
-use rooch_framework::bindings::address_mapping::AddressMapping;
-use rooch_framework::bindings::auth_validator::AuthValidatorCaller;
-use rooch_framework::bindings::transaction_validator::TransactionValidator;
 use rooch_genesis::RoochGenesis;
 use rooch_store::RoochStore;
 use rooch_types::address::MultiChainAddress;
+use rooch_types::framework::address_mapping::AddressMapping;
+use rooch_types::framework::auth_validator::AuthValidatorCaller;
 use rooch_types::framework::auth_validator::TxValidateResult;
+use rooch_types::framework::transaction_validator::TransactionValidator;
 use rooch_types::transaction::AuthenticatorInfo;
 use rooch_types::transaction::{AbstractTransaction, TransactionSequenceMapping};
 
@@ -65,7 +66,7 @@ impl ExecutorActor {
         multi_chain_address_sender: MultiChainAddress,
     ) -> Result<AccountAddress> {
         let resolved_sender = {
-            let address_mapping = self.moveos.as_module_bundle::<AddressMapping>();
+            let address_mapping = self.moveos.as_module_binding::<AddressMapping>();
             address_mapping.resovle_or_generate(multi_chain_address_sender)?
         };
 
@@ -115,7 +116,7 @@ impl ExecutorActor {
         ctx: &TxContext,
         authenticator: AuthenticatorInfo,
     ) -> Result<(TxValidateResult, Vec<FunctionCall>, Vec<FunctionCall>)> {
-        let tx_validator = self.moveos.as_module_bundle::<TransactionValidator>();
+        let tx_validator = self.moveos.as_module_binding::<TransactionValidator>();
         let tx_validate_result = tx_validator.validate(ctx, authenticator.clone())?;
         let auth_validator_option = tx_validate_result.auth_validator();
         match auth_validator_option {
@@ -222,20 +223,28 @@ impl Handler<ExecuteViewFunctionMessage> for ExecutorActor {
         &mut self,
         msg: ExecuteViewFunctionMessage,
         _ctx: &mut ActorContext,
-    ) -> Result<Vec<AnnotatedFunctionReturnValue>, anyhow::Error> {
+    ) -> Result<AnnotatedFunctionResult, anyhow::Error> {
         let resoler = self.moveos.moveos_resolver();
 
-        self.moveos
-            .execute_view_function(msg.call)?
-            .into_iter()
-            .map(|v| {
-                let move_value = resoler.view_value(&v.type_tag, &v.value)?;
-                Ok(AnnotatedFunctionReturnValue {
-                    value: v,
-                    move_value,
-                })
-            })
-            .collect::<Result<Vec<AnnotatedFunctionReturnValue>, anyhow::Error>>()
+        let function_result = self.moveos.execute_view_function(msg.call);
+        Ok(AnnotatedFunctionResult {
+            vm_status: function_result.vm_status,
+            return_values: match function_result.return_values {
+                Some(values) => Some(
+                    values
+                        .into_iter()
+                        .map(|v| {
+                            let move_value = resoler.view_value(&v.type_tag, &v.value)?;
+                            Ok(AnnotatedFunctionReturnValue {
+                                value: v,
+                                move_value,
+                            })
+                        })
+                        .collect::<Result<Vec<AnnotatedFunctionReturnValue>, anyhow::Error>>()?,
+                ),
+                None => None,
+            },
+        })
     }
 }
 
