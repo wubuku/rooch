@@ -1,0 +1,59 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE hibernate-mapping PUBLIC "-//Hibernate/Hibernate Mapping DTD 3.0//EN" "http://www.hibernate.org/dtd/hibernate-mapping-3.0.dtd"[]>
+<hibernate-mapping package="org.test.roochblogdemo.domain.article">
+  <class name="AbstractArticleEvent" table="article_event" abstract="true">
+    <composite-id name="articleEventId" class="org.test.roochblogdemo.domain.article.ArticleEventId">
+      <key-property name="id">
+        <column name="id" sql-type="VARCHAR(66)" />
+      </key-property>
+      <key-property name="version">
+        <column name="version" sql-type="DECIMAL(20,0)" />
+      </key-property>
+    </composite-id>
+    <discriminator column="event_type" type="string" />
+    <property name="createdBy" column="created_by" />
+    <property name="createdAt" column="created_at" />
+    <property name="commandId" column="command_id" />
+    <component name="roochEventId" class="org.test.roochblogdemo.domain.RoochEventId">
+      <property name="eventHandleId">
+        <column name="rooch_event_id_event_handle_id" sql-type="VARCHAR(66)" />
+      </property>
+      <property name="eventSeq">
+        <column name="rooch_event_id_event_seq" sql-type="DECIMAL(20,0)" />
+      </property>
+    </component>
+    <property name="roochSender">
+      <column name="rooch_sender" sql-type="VARCHAR(66)" />
+    </property>
+    <property name="roochTxHash">
+      <column name="rooch_tx_hash" sql-type="VARCHAR(66)" />
+    </property>
+    <property name="roochTypeTag">
+      <column name="rooch_type_tag" length="500" />
+    </property>
+    <property name="roochTimestampMs">
+      <column name="rooch_timestamp_ms" />
+    </property>
+    <property name="roochBlockHeight">
+      <column name="rooch_block_height" sql-type="DECIMAL(20,0)" />
+    </property>
+    <property name="roochEventIndex">
+      <column name="rooch_event_index" />
+    </property>
+    <property name="status">
+      <column name="status" sql-type="CHAR(1)" />
+    </property>
+    <property name="commandType" column="command_type" length="50" />
+    <subclass name="AbstractArticleEvent$ArticleClobEvent" discriminator-value="ArticleClobEvent">
+      <property name="DynamicPropertiesLob">
+        <column name="dynamic_properties_lob" sql-type="VARCHAR(2000)" />
+      </property>
+      <subclass name="AbstractArticleEvent$CommentUpdated" discriminator-value="CommentUpdated" />
+      <subclass name="AbstractArticleEvent$CommentRemoved" discriminator-value="CommentRemoved" />
+      <subclass name="AbstractArticleEvent$CommentAdded" discriminator-value="CommentAdded" />
+      <subclass name="AbstractArticleEvent$ArticleCreated" discriminator-value="ArticleCreated" />
+      <subclass name="AbstractArticleEvent$ArticleUpdated" discriminator-value="ArticleUpdated" />
+      <subclass name="AbstractArticleEvent$ArticleDeleted" discriminator-value="ArticleDeleted" />
+    </subclass>
+  </class>
+</hibernate-mapping>
