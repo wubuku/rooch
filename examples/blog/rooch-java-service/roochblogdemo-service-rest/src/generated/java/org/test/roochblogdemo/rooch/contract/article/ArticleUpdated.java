@@ -58,7 +58,7 @@ public class ArticleUpdated {
     @Override
     public String toString() {
         return "ArticleUpdated{" +
-                "id='" + id + '\'' +
+                "id=" + '\'' + id + '\'' +
                 ", version=" + version +
                 ", title=" + '\'' + title + '\'' +
                 ", body=" + '\'' + body + '\'' +

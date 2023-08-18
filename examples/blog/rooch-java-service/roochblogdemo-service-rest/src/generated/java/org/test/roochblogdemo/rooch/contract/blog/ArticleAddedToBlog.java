@@ -15,21 +15,11 @@ import java.util.*;
 
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public class ArticleAddedToBlog {
-    private String id;
-
     private String accountAddress;
 
     private BigInteger version;
 
     private String articleId;
-
-    public String getId() {
-        return id;
-    }
-
-    public void setId(String id) {
-        this.id = id;
-    }
 
     public String getAccountAddress() {
         return accountAddress;
@@ -58,8 +48,7 @@ public class ArticleAddedToBlog {
     @Override
     public String toString() {
         return "ArticleAddedToBlog{" +
-                "id='" + id + '\'' +
-                ", accountAddress=" + '\'' + accountAddress + '\'' +
+                "accountAddress=" + '\'' + accountAddress + '\'' +
                 ", version=" + version +
                 ", articleId=" + '\'' + articleId + '\'' +
                 '}';

@@ -48,7 +48,7 @@ public class CommentRemoved {
     @Override
     public String toString() {
         return "CommentRemoved{" +
-                "id='" + id + '\'' +
+                "id=" + '\'' + id + '\'' +
                 ", version=" + version +
                 ", commentSeqId=" + commentSeqId +
                 '}';

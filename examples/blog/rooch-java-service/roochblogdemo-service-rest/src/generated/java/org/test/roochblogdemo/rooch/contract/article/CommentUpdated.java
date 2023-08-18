@@ -78,7 +78,7 @@ public class CommentUpdated {
     @Override
     public String toString() {
         return "CommentUpdated{" +
-                "id='" + id + '\'' +
+                "id=" + '\'' + id + '\'' +
                 ", version=" + version +
                 ", commentSeqId=" + commentSeqId +
                 ", commenter=" + '\'' + commenter + '\'' +

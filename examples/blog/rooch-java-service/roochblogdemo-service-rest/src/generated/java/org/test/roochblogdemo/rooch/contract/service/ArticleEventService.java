@@ -39,6 +39,13 @@ public class ArticleEventService {
         return DELETION_COMMAND_EVENTS.contains(eventType);
     }
 
+    public static boolean isDeletionCommand(AbstractArticleEvent e) {
+        if (isDeletionCommand(e.getEventType())) {
+            return true;
+        }
+        return false;
+    }
+
     @Value("${rooch.contract.address}")
     private String contractAddress;
 

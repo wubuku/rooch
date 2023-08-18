@@ -28,7 +28,7 @@ public class UpdateBlogStateTaskService {
     @Transactional
     public void updateBlogStates() {
         blogEventRepository.findByStatusIsNull().forEach(e -> {
-            if (BlogEventService.isDeletionCommand(e.getEventType())) {
+            if (BlogEventService.isDeletionCommand(e)) {
                 roochBlogService.deleteBlog(e.getAccountAddress());
             } else {
                 roochBlogService.updateBlogState(e.getAccountAddress());
