@@ -1,12 +1,17 @@
 // Copyright (c) RoochNetwork
 // SPDX-License-Identifier: Apache-2.0
 
-use self::authenticator::Authenticator;
-use crate::{address::MultiChainAddress, H256};
-use anyhow::Result;
+use self::{authenticator::Authenticator, ethereum::EthereumTransaction, rooch::RoochTransaction};
+use crate::address::MultiChainAddress;
+use crate::multichain_id::{MultiChainID, ETHER, ROOCH};
+use anyhow::{format_err, Result};
 use move_core_types::account_address::AccountAddress;
-use moveos_types::transaction::MoveOSTransaction;
+use moveos_types::transaction::TransactionExecutionInfo;
+use moveos_types::{h256::H256, transaction::MoveOSTransaction};
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::fmt::{Display, Formatter};
+use std::str::FromStr;
 
 pub mod authenticator;
 pub mod ethereum;
@@ -18,6 +23,33 @@ pub enum TransactionType {
     Ethereum,
 }
 
+impl TransactionType {
+    pub fn transaction_type_name(&self) -> String {
+        self.to_string()
+    }
+}
+
+impl Display for TransactionType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            TransactionType::Rooch => write!(f, "Rooch"),
+            TransactionType::Ethereum => write!(f, "Ethereum"),
+        }
+    }
+}
+
+impl FromStr for TransactionType {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "Rooch" => Ok(TransactionType::Rooch),
+            "Ethereum" => Ok(TransactionType::Ethereum),
+            s => Err(format_err!("Unknown transaction type: {}", s)),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct RawTransaction {
     pub transaction_type: TransactionType,
@@ -26,14 +58,14 @@ pub struct RawTransaction {
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct AuthenticatorInfo {
-    pub seqence_number: u64,
+    pub chain_id: u64,
     pub authenticator: Authenticator,
 }
 
 impl AuthenticatorInfo {
-    pub fn new(seqence_number: u64, authenticator: Authenticator) -> Self {
+    pub fn new(chain_id: u64, authenticator: Authenticator) -> Self {
         Self {
-            seqence_number,
+            chain_id,
             authenticator,
         }
     }
@@ -59,20 +91,24 @@ pub trait AbstractTransaction {
 
     fn sender(&self) -> MultiChainAddress;
 
+    fn original_address_str(&self) -> String;
+
     fn tx_hash(&self) -> H256;
 
-    fn authenticator_info(&self) -> AuthenticatorInfo;
+    fn authenticator_info(&self) -> Result<AuthenticatorInfo>;
 
     fn construct_moveos_transaction(
         self,
         resolved_sender: AccountAddress,
     ) -> Result<MoveOSTransaction>;
+
+    fn multi_chain_id(&self) -> MultiChainID;
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum TypedTransaction {
-    Rooch(rooch::RoochTransaction),
-    Ethereum(ethereum::EthereumTransaction),
+    Rooch(RoochTransaction),
+    Ethereum(EthereumTransaction),
 }
 
 impl TryFrom<RawTransaction> for TypedTransaction {
@@ -85,7 +121,7 @@ impl TryFrom<RawTransaction> for TypedTransaction {
                 Ok(TypedTransaction::Rooch(tx))
             }
             TransactionType::Ethereum => {
-                let tx = ethereum::EthereumTransaction::decode(&raw.raw)?;
+                let tx = EthereumTransaction::decode(&raw.raw)?;
                 Ok(TypedTransaction::Ethereum(tx))
             }
         }
@@ -122,7 +158,7 @@ impl AbstractTransaction for TypedTransaction {
         }
     }
 
-    fn authenticator_info(&self) -> AuthenticatorInfo {
+    fn authenticator_info(&self) -> Result<AuthenticatorInfo> {
         match self {
             TypedTransaction::Rooch(tx) => tx.authenticator_info(),
             TypedTransaction::Ethereum(tx) => tx.authenticator_info(),
@@ -145,13 +181,27 @@ impl AbstractTransaction for TypedTransaction {
             TypedTransaction::Ethereum(tx) => tx.sender(),
         }
     }
+
+    fn original_address_str(&self) -> String {
+        match self {
+            TypedTransaction::Rooch(tx) => tx.original_address_str(),
+            TypedTransaction::Ethereum(tx) => tx.original_address_str(),
+        }
+    }
+
+    fn multi_chain_id(&self) -> MultiChainID {
+        match self {
+            TypedTransaction::Rooch(_tx) => MultiChainID::from(ROOCH),
+            TypedTransaction::Ethereum(_tx) => MultiChainID::from(ETHER),
+        }
+    }
 }
 
 ///`TransactionSequenceInfo` represents the result of sequence a transaction.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct TransactionSequenceInfo {
     /// The tx order
-    pub tx_order: u128,
+    pub tx_order: u64,
     /// The tx order signature, it is the signature of the sequencer to commit the tx order.
     pub tx_order_signature: Authenticator,
     /// The tx accumulator root after the tx is append to the accumulator.
@@ -160,7 +210,7 @@ pub struct TransactionSequenceInfo {
 
 impl TransactionSequenceInfo {
     pub fn new(
-        tx_order: u128,
+        tx_order: u64,
         tx_order_signature: Authenticator,
         tx_accumulator_root: H256,
     ) -> TransactionSequenceInfo {
@@ -172,17 +222,25 @@ impl TransactionSequenceInfo {
     }
 }
 
+/// Transaction with sequence info and execution info.
+#[derive(Debug, Clone)]
+pub struct TransactionWithInfo {
+    pub transaction: TypedTransaction,
+    pub sequence_info: TransactionSequenceInfo,
+    pub execution_info: TransactionExecutionInfo,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct TransactionSequenceMapping {
+pub struct TransactionSequenceInfoMapping {
     /// The tx order
-    pub tx_order: u128,
+    pub tx_order: u64,
     /// The tx hash.
     pub tx_hash: H256,
 }
 
-impl TransactionSequenceMapping {
-    pub fn new(tx_order: u128, tx_hash: H256) -> TransactionSequenceMapping {
-        TransactionSequenceMapping { tx_order, tx_hash }
+impl TransactionSequenceInfoMapping {
+    pub fn new(tx_order: u64, tx_hash: H256) -> TransactionSequenceInfoMapping {
+        TransactionSequenceInfoMapping { tx_order, tx_hash }
     }
 }
 

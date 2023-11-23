@@ -1,14 +1,14 @@
+// Copyright (c) RoochNetwork
+// SPDX-License-Identifier: Apache-2.0
+
 module rooch_examples::complex_struct {
 
-   use moveos_std::storage_context::{Self, StorageContext};
-   use moveos_std::tx_context;
-   use moveos_std::account_storage;
-   use moveos_std::object_id::{ObjectID};
-   use moveos_std::object;
-   use moveos_std::object_storage;
+   use moveos_std::context::{Self, Context};
+   use moveos_std::object::{Self, Object};
+   use moveos_std::object::ObjectID;
    use moveos_std::bcs;
+   use moveos_std::signer;
    use std::vector;
-   use std::signer;
 
    struct SimpleStruct has store, copy, drop {
       value: u64,
@@ -104,27 +104,21 @@ module rooch_examples::complex_struct {
    } 
 
    //init when module publish
-   fun init(ctx: &mut StorageContext, sender: signer) {
-      
-      let addr = signer::address_of(&sender);
-      let object_id = {
-         let tx_ctx = storage_context::tx_context_mut(ctx);
-         tx_context::fresh_object_id(tx_ctx) 
-      };
+   fun init(ctx: &mut Context) {
+      let module_signer = signer::module_signer<ComplexStruct>();
+      let object_id = context::fresh_object_id(ctx);
       let s = new_complex_struct(object_id);
-      let complex_object = {
-         let tx_ctx = storage_context::tx_context_mut(ctx);
-         object::new(tx_ctx, addr, s)
-      };
-      let complex_object_id = object::id(&complex_object);
-      let object_storage = storage_context::object_storage_mut(ctx);
-      object_storage::add(object_storage, complex_object);
-
-      let s2 = new_complex_struct(complex_object_id);
-      account_storage::global_move_to(ctx, &sender, s2);
+      let complex_object = context::new_object(ctx, s);
+      object::transfer(complex_object, @rooch_examples);
+      let s2 = new_complex_struct(object_id);
+      context::move_resource_to(ctx, &module_signer, s2);
    }
 
-   public fun value(ctx: & StorageContext): &ComplexStruct {
-      account_storage::global_borrow<ComplexStruct>(ctx,@rooch_examples)
+   public fun value(ctx: &Context): &ComplexStruct {
+      context::borrow_resource<ComplexStruct>(ctx,@rooch_examples)
+   }
+
+   public fun value_of_object(obj: &Object<ComplexStruct>) : &ComplexStruct {
+      object::borrow(obj)
    }
 }

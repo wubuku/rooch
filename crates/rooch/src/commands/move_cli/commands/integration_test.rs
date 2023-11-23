@@ -23,6 +23,8 @@ use std::num::NonZeroUsize;
 use std::str::FromStr;
 use std::sync::Mutex;
 
+use crate::cli_types::WalletContextOptions;
+
 pub const INTEGRATION_TESTS_DIR: &str = "integration-tests";
 
 static G_PRE_COMPILED_LIB: Lazy<Mutex<Option<FullyCompiledProgram>>> =
@@ -110,6 +112,9 @@ pub struct TestOpts {
 #[derive(Parser)]
 pub struct IntegrationTest {
     #[clap(flatten)]
+    context_options: WalletContextOptions,
+
+    #[clap(flatten)]
     test_opts: TestOpts,
     #[clap(long = "ub")]
     /// update test baseline.
@@ -125,7 +130,7 @@ pub struct IntegrationTest {
 
     /// Named addresses for the move binary
     ///
-    /// Example: alice=0x1234, bob=0x5678
+    /// Example: alice=0x1234, bob=default, alice2=alice
     ///
     /// Note: This will fail if there are duplicates in the Move.toml file remove those first.
     #[clap(long, parse(try_from_str = crate::utils::parse_map), default_value = "")]
@@ -133,30 +138,24 @@ pub struct IntegrationTest {
 }
 
 impl IntegrationTest {
-    pub fn execute(self, move_arg: Move) -> anyhow::Result<()> {
+    pub async fn execute(self, move_arg: Move) -> anyhow::Result<()> {
         let rerooted_path = {
             let path = match move_arg.package_path {
-                Some(_) => move_arg.package_path.clone(),
+                Some(_) => move_arg.package_path,
                 None => Some(std::env::current_dir()?),
             };
             // Always root ourselves to the package root, and then compile relative to that.
             SourcePackageLayout::try_find_root(&path.as_ref().unwrap().canonicalize()?)?
         };
 
+        let context = self.context_options.build()?;
+
         // force move to rebuild all packages, so that we can use compile_driver to generate the full compiled program.
         let mut build_config = move_arg.build_config;
-        let _ = self
-            .named_addresses
-            .iter()
-            .map(|(key, value)| {
-                build_config.additional_named_addresses.insert(
-                    key.clone(),
-                    NumericalAddress::parse_str(value.as_str())
-                        .unwrap()
-                        .into_inner(),
-                )
-            })
-            .collect::<Vec<_>>();
+        build_config
+            .additional_named_addresses
+            .extend(context.parse_and_resolve_addresses(self.named_addresses)?);
+
         build_config.force_recompilation = true;
 
         let resolved_graph =

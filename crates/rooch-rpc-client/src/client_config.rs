@@ -3,30 +3,31 @@
 
 use crate::{Client, ClientBuilder};
 use anyhow::anyhow;
-use rooch_config::rpc::server_config::ServerConfig;
-use rooch_config::Config;
-use rooch_key::keystore::{AccountKeystore, Keystore};
+use rooch_config::config::Config;
+use rooch_config::server_config::ServerConfig;
 use rooch_types::address::RoochAddress;
+use rooch_types::chain_id::RoochChainID;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_with::serde_as;
 use std::fmt::{Display, Formatter, Write};
+use std::path::PathBuf;
 
 pub const DEFAULT_EXPIRATION_SECS: u64 = 30;
+pub const ROOCH_DEV_NET_URL: &str = "https://dev-seed.rooch.network:443/";
+pub const ROOCH_TEST_NET_URL: &str = "https://test-seed.rooch.network:443/";
 
-#[serde_as]
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ClientConfig {
-    pub keystore: Keystore,
+    pub keystore_path: PathBuf,
     pub active_address: Option<RoochAddress>,
     pub envs: Vec<Env>,
     pub active_env: Option<String>,
 }
 
 impl ClientConfig {
-    pub fn new(keystore: Keystore) -> Self {
+    pub fn new(keystore_path: PathBuf) -> Self {
         ClientConfig {
-            keystore,
+            keystore_path,
             active_address: None,
             envs: vec![],
             active_env: None,
@@ -51,11 +52,14 @@ impl ClientConfig {
     }
 
     pub fn add_env(&mut self, env: Env) {
-        if !self
+        let find_env = self
             .envs
-            .iter()
-            .any(|other_env| other_env.alias == env.alias)
-        {
+            .iter_mut()
+            .find(|other_env| other_env.alias == env.alias);
+        if let Some(update_env) = find_env {
+            update_env.rpc = env.rpc;
+            update_env.ws = env.ws;
+        } else {
             self.envs.push(env)
         }
     }
@@ -86,12 +90,28 @@ impl Env {
 
         builder.build(&self.rpc).await
     }
+
+    pub fn new_dev_env() -> Self {
+        Self {
+            alias: RoochChainID::DEV.chain_name().to_lowercase(),
+            rpc: ROOCH_DEV_NET_URL.into(),
+            ws: None,
+        }
+    }
+
+    pub fn new_test_env() -> Self {
+        Self {
+            alias: RoochChainID::TEST.chain_name().to_lowercase(),
+            rpc: ROOCH_TEST_NET_URL.into(),
+            ws: None,
+        }
+    }
 }
 
 impl Default for Env {
     fn default() -> Self {
         Env {
-            alias: "default".to_string(),
+            alias: RoochChainID::LOCAL.chain_name().to_lowercase(),
             rpc: ServerConfig::default().url(false),
             ws: None,
         }
@@ -117,17 +137,12 @@ impl Display for ClientConfig {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let mut writer = String::new();
 
-        writeln!(
-            writer,
-            "Managed addresses : {}",
-            self.keystore.addresses().len()
-        )?;
+        writeln!(writer, "Keystore path : {:?}", self.keystore_path)?;
         write!(writer, "Active address: ")?;
         match self.active_address {
             Some(r) => writeln!(writer, "{}", r)?,
             None => writeln!(writer, "None")?,
         };
-        writeln!(writer, "{}", self.keystore)?;
         write!(writer, "server: ")?;
 
         if let Ok(env) = self.get_active_env() {

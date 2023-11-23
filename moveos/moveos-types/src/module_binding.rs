@@ -4,8 +4,8 @@
 use crate::{
     function_return_value::FunctionResult,
     move_types::FunctionId,
+    moveos_std::tx_context::TxContext,
     transaction::{FunctionCall, MoveAction},
-    tx_context::TxContext,
 };
 use anyhow::Result;
 use move_core_types::{
@@ -15,7 +15,7 @@ use move_core_types::{
     value::MoveValue,
 };
 
-pub trait MoveFunctionCaller {
+pub trait MoveFunctionCaller: Send + Sync {
     fn call_function(&self, ctx: &TxContext, call: FunctionCall) -> Result<FunctionResult>;
 
     fn as_module_binding<'a, M: ModuleBinding<'a>>(&'a self) -> M
@@ -53,13 +53,22 @@ pub trait ModuleBinding<'a> {
         ty_args: Vec<TypeTag>,
         args: Vec<MoveValue>,
     ) -> MoveAction {
-        MoveAction::Function(FunctionCall::new(
+        MoveAction::Function(Self::create_function_call(function_name, ty_args, args))
+    }
+
+    /// Çonstruct a FunctionCall
+    fn create_function_call(
+        function_name: &IdentStr,
+        ty_args: Vec<TypeTag>,
+        args: Vec<MoveValue>,
+    ) -> FunctionCall {
+        FunctionCall::new(
             Self::function_id(function_name),
             ty_args,
             args.into_iter()
                 .map(|v| v.simple_serialize().expect("Failed to serialize MoveValue"))
                 .collect(),
-        ))
+        )
     }
 
     fn new(caller: &'a impl MoveFunctionCaller) -> Self

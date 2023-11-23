@@ -14,7 +14,7 @@ pub struct ListCommand {
 
 impl ListCommand {
     pub async fn execute(self) -> RoochResult<()> {
-        let context = self.context_options.build().await?;
+        let context = self.context_options.build()?;
 
         println!(
             "{:^24} | {:^48} | {:^48} | {:^12}",
@@ -22,9 +22,9 @@ impl ListCommand {
         );
         println!("{}", ["-"; 153].join(""));
 
-        for env in context.config.envs.iter() {
+        for env in context.client_config.envs.iter() {
             let mut active = "";
-            if context.config.active_env == Some(env.alias.clone()) {
+            if context.client_config.active_env == Some(env.alias.clone()) {
                 active = "True"
             }
 

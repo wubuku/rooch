@@ -12,8 +12,8 @@ use moveos_types::{
     function_return_value::DecodedFunctionResult,
     module_binding::{ModuleBinding, MoveFunctionCaller},
     move_types::FunctionId,
+    moveos_std::tx_context::TxContext,
     transaction::FunctionCall,
-    tx_context::TxContext,
 };
 
 /// Rust bindings for RoochFramework transaction_validator module
@@ -35,10 +35,8 @@ impl<'a> TransactionValidator<'a> {
             Self::function_id(Self::VALIDATE_FUNCTION_NAME),
             vec![],
             vec![
-                MoveValue::U64(auth.seqence_number)
-                    .simple_serialize()
-                    .unwrap(),
-                MoveValue::U64(auth.authenticator.scheme)
+                MoveValue::U64(auth.chain_id).simple_serialize().unwrap(),
+                MoveValue::U64(auth.authenticator.auth_validator_id)
                     .simple_serialize()
                     .unwrap(),
                 MoveValue::vector_u8(auth.authenticator.payload)

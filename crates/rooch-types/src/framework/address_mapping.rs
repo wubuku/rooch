@@ -7,10 +7,10 @@ use anyhow::{Ok, Result};
 use move_core_types::{account_address::AccountAddress, ident_str, identifier::IdentStr};
 use moveos_types::{
     module_binding::{ModuleBinding, MoveFunctionCaller},
-    move_option::MoveOption,
-    state::MoveStructState,
+    move_std::option::MoveOption,
+    moveos_std::tx_context::TxContext,
+    state::MoveState,
     transaction::FunctionCall,
-    tx_context::TxContext,
 };
 
 /// Rust bindings for RoochFramework address_mapping module
@@ -47,7 +47,7 @@ impl<'a> AddressMapping<'a> {
         }
     }
 
-    pub fn resovle_or_generate(
+    pub fn resolve_or_generate(
         &self,
         multichain_address: MultiChainAddress,
     ) -> Result<AccountAddress> {

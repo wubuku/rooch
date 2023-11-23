@@ -33,39 +33,17 @@ The same as <code><a href="any.md#0x2_any_Any">any::Any</a></code> but with the 
 
 
 
-<details>
-<summary>Fields</summary>
-
-
-<dl>
-<dt>
-<code><a href="">type_name</a>: <a href="_String">string::String</a></code>
-</dt>
-<dd>
-
-</dd>
-<dt>
-<code>data: <a href="">vector</a>&lt;u8&gt;</code>
-</dt>
-<dd>
-
-</dd>
-</dl>
-
-
-</details>
-
 <a name="@Constants_0"></a>
 
 ## Constants
 
 
-<a name="0x2_copyable_any_ETYPE_MISMATCH"></a>
+<a name="0x2_copyable_any_ErrorTypeMismatch"></a>
 
 The type provided for <code>unpack</code> is not the same as was given for <code>pack</code>.
 
 
-<pre><code><b>const</b> <a href="copyable_any.md#0x2_copyable_any_ETYPE_MISMATCH">ETYPE_MISMATCH</a>: u64 = 0;
+<pre><code><b>const</b> <a href="copyable_any.md#0x2_copyable_any_ErrorTypeMismatch">ErrorTypeMismatch</a>: u64 = 1;
 </code></pre>
 
 
@@ -83,22 +61,6 @@ also required from <code>T</code>.
 
 
 
-<details>
-<summary>Implementation</summary>
-
-
-<pre><code><b>public</b> <b>fun</b> <a href="copyable_any.md#0x2_copyable_any_pack">pack</a>&lt;T: drop + store + <b>copy</b>&gt;(x: T): <a href="copyable_any.md#0x2_copyable_any_Any">Any</a> {
-    <a href="copyable_any.md#0x2_copyable_any_Any">Any</a> {
-        <a href="">type_name</a>: <a href="type_info.md#0x2_type_info_type_name">type_info::type_name</a>&lt;T&gt;(),
-        data: <a href="../doc/bcs.md#0x1_bcs_to_bytes">bcs::to_bytes</a>(&x)
-    }
-}
-</code></pre>
-
-
-
-</details>
-
 <a name="0x2_copyable_any_unpack"></a>
 
 ## Function `unpack`
@@ -111,20 +73,6 @@ Unpack a value from the <code><a href="copyable_any.md#0x2_copyable_any_Any">Any
 
 
 
-<details>
-<summary>Implementation</summary>
-
-
-<pre><code><b>public</b> <b>fun</b> <a href="copyable_any.md#0x2_copyable_any_unpack">unpack</a>&lt;T&gt;(x: <a href="copyable_any.md#0x2_copyable_any_Any">Any</a>): T {
-    <b>assert</b>!(<a href="type_info.md#0x2_type_info_type_name">type_info::type_name</a>&lt;T&gt;() == x.<a href="">type_name</a>, <a href="_invalid_argument">error::invalid_argument</a>(<a href="copyable_any.md#0x2_copyable_any_ETYPE_MISMATCH">ETYPE_MISMATCH</a>));
-    bcs::from_bytes&lt;T&gt;(x.data)
-}
-</code></pre>
-
-
-
-</details>
-
 <a name="0x2_copyable_any_type_name"></a>
 
 ## Function `type_name`
@@ -134,18 +82,3 @@ Returns the type name of this Any
 
 <pre><code><b>public</b> <b>fun</b> <a href="">type_name</a>(x: &<a href="copyable_any.md#0x2_copyable_any_Any">copyable_any::Any</a>): &<a href="_String">string::String</a>
 </code></pre>
-
-
-
-<details>
-<summary>Implementation</summary>
-
-
-<pre><code><b>public</b> <b>fun</b> <a href="">type_name</a>(x: &<a href="copyable_any.md#0x2_copyable_any_Any">Any</a>): &String {
-    &x.<a href="">type_name</a>
-}
-</code></pre>
-
-
-
-</details>

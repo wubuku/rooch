@@ -1,10 +1,10 @@
 processed 4 tasks
 
-task 1 'publish'. lines 3-51:
+task 1 'publish'. lines 3-39:
 status EXECUTED
 
-task 2 'run'. lines 53-65:
+task 2 'run'. lines 41-53:
 status EXECUTED
 
-task 3 'run'. lines 67-80:
+task 3 'run'. lines 55-67:
 status EXECUTED

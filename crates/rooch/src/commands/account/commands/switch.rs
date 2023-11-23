@@ -4,7 +4,7 @@
 use crate::cli_types::{CommandAction, WalletContextOptions};
 use async_trait::async_trait;
 use clap::Parser;
-use rooch_key::keystore::AccountKeystore;
+use rooch_key::keystore::account_keystore::AccountKeystore;
 use rooch_types::{
     address::RoochAddress,
     error::{RoochError, RoochResult},
@@ -24,20 +24,20 @@ pub struct SwitchCommand {
 #[async_trait]
 impl CommandAction<()> for SwitchCommand {
     async fn execute(self) -> RoochResult<()> {
-        let mut context = self.context_options.build().await?;
+        let mut context = self.context_options.build()?;
         let rooch_address = RoochAddress::from_str(self.address.as_str()).map_err(|e| {
             RoochError::CommandArgumentError(format!("Invalid Rooch address String: {}", e))
         })?;
 
-        if !context.config.keystore.addresses().contains(&rooch_address) {
+        if !context.keystore.addresses().contains(&rooch_address) {
             return Err(RoochError::SwitchAccountError(format!(
                 "Address `{}` does not in the Rooch keystore",
                 self.address
             )));
         }
 
-        context.config.active_address = Some(rooch_address);
-        context.config.save()?;
+        context.client_config.active_address = Some(rooch_address);
+        context.client_config.save()?;
 
         println!(
             "The active account was successfully switched to `{}`",

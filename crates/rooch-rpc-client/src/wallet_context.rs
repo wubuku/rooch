@@ -3,14 +3,21 @@
 
 use crate::client_config::{ClientConfig, DEFAULT_EXPIRATION_SECS};
 use crate::Client;
-use anyhow::anyhow;
+use anyhow::{anyhow, Result};
+use move_command_line_common::address::ParsedAddress;
 use move_core_types::account_address::AccountAddress;
+use moveos_types::gas_config::GasConfig;
 use moveos_types::transaction::MoveAction;
-use rooch_config::{rooch_config_dir, Config, PersistedConfig, ROOCH_CLIENT_CONFIG};
-use rooch_key::keystore::AccountKeystore;
+use rooch_config::config::{Config, PersistedConfig};
+use rooch_config::server_config::ServerConfig;
+use rooch_config::{rooch_config_dir, ROOCH_CLIENT_CONFIG, ROOCH_SERVER_CONFIG};
+use rooch_key::keystore::account_keystore::AccountKeystore;
+use rooch_key::keystore::file_keystore::FileBasedKeystore;
+use rooch_key::keystore::Keystore;
 use rooch_rpc_api::jsonrpc_types::{ExecuteTransactionResponseView, KeptVMStatusView};
 use rooch_types::address::RoochAddress;
-use rooch_types::crypto::{BuiltinScheme, Signature};
+use rooch_types::addresses;
+use rooch_types::crypto::Signature;
 use rooch_types::error::{RoochError, RoochResult};
 use rooch_types::transaction::{
     authenticator::Authenticator,
@@ -18,46 +25,98 @@ use rooch_types::transaction::{
 };
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 
 pub struct WalletContext {
     client: Arc<RwLock<Option<Client>>>,
-    pub config: PersistedConfig<ClientConfig>,
+    pub client_config: PersistedConfig<ClientConfig>,
+    pub server_config: PersistedConfig<ServerConfig>,
+    pub keystore: Keystore,
+    pub address_mapping: BTreeMap<String, AccountAddress>,
 }
 
+pub type AddressMappingFn = Box<dyn Fn(&str) -> Option<AccountAddress> + Send + Sync>;
+
 impl WalletContext {
-    pub async fn new(config_path: Option<PathBuf>) -> Result<Self, anyhow::Error> {
+    pub fn new(config_path: Option<PathBuf>) -> Result<Self, anyhow::Error> {
         let config_dir = config_path.unwrap_or(rooch_config_dir()?);
-        let config_path = config_dir.join(ROOCH_CLIENT_CONFIG);
-        let config: ClientConfig = PersistedConfig::read(&config_path).map_err(|err| {
+        let client_config_path = config_dir.join(ROOCH_CLIENT_CONFIG);
+        let server_config_path = config_dir.join(ROOCH_SERVER_CONFIG);
+        let client_config: ClientConfig = PersistedConfig::read(&client_config_path).map_err(|err| {
             anyhow!(
                 "Cannot open wallet config file at {:?}. Err: {err}, Use `rooch init` to configuration",
-                config_path
+                client_config_path
+            )
+        })?;
+        let server_config: ServerConfig = PersistedConfig::read(&server_config_path).map_err(|err| {
+            anyhow!(
+                "Cannot open server config file at {:?}. Err: {err}, Use `rooch init` to configuration",
+                server_config_path
             )
         })?;
 
-        let config = config.persisted(&config_path);
+        let client_config = client_config.persisted(&client_config_path);
+        let server_config = server_config.persisted(&server_config_path);
+
+        let keystore_result = FileBasedKeystore::load(&client_config.keystore_path);
+        let keystore = match keystore_result {
+            Ok(file_keystore) => Keystore::File(file_keystore),
+            Err(error) => return Err(error),
+        };
+
+        let mut address_mapping = BTreeMap::new();
+        address_mapping.extend(addresses::rooch_framework_named_addresses());
+
+        //TODO support account name alias name.
+        if let Some(active_address) = client_config.active_address {
+            address_mapping.insert("default".to_string(), AccountAddress::from(active_address));
+        }
+
         Ok(Self {
             client: Default::default(),
-            config,
+            client_config,
+            server_config,
+            keystore,
+            address_mapping,
         })
     }
 
-    pub fn parse_account_arg(&self, arg: String) -> Result<AccountAddress, RoochError> {
-        self.parse(arg)
+    pub fn add_address_mapping(&mut self, name: String, address: AccountAddress) {
+        self.address_mapping.insert(name, address);
     }
 
-    pub fn parse_account_args(
+    pub fn address_mapping(&self) -> AddressMappingFn {
+        let address_mapping = self.address_mapping.clone();
+        Box::new(move |name| address_mapping.get(name).cloned())
+    }
+
+    pub fn resolve_address(&self, parsed_address: ParsedAddress) -> RoochResult<AccountAddress> {
+        match parsed_address {
+            ParsedAddress::Numerical(address) => Ok(address.into_inner()),
+            ParsedAddress::Named(name) => {
+                self.address_mapping.get(&name).cloned().ok_or_else(|| {
+                    RoochError::CommandArgumentError(format!("Unknown named address: {}", name))
+                })
+            }
+        }
+    }
+
+    /// Parse and resolve addresses from a map of name to address string    
+    pub fn parse_and_resolve_addresses(
         &self,
-        args: BTreeMap<String, String>,
-    ) -> Result<BTreeMap<String, AccountAddress>, RoochError> {
-        Ok(args
+        addresses: BTreeMap<String, String>,
+    ) -> RoochResult<BTreeMap<String, AccountAddress>> {
+        addresses
             .into_iter()
-            .map(|(key, value)| (key, self.parse(value).unwrap()))
-            .collect())
+            .map(|(key, value)| {
+                let parsed_address = ParsedAddress::parse(value.as_str())?;
+                let account_address = self.resolve_address(parsed_address)?;
+                Ok((key, account_address))
+            })
+            .collect::<Result<BTreeMap<_, _>>>()
+            .map_err(|e| RoochError::CommandArgumentError(e.to_string()))
     }
 
     pub async fn get_client(&self) -> Result<Client, anyhow::Error> {
@@ -70,7 +129,7 @@ impl WalletContext {
         } else {
             drop(read);
             let client = self
-                .config
+                .client_config
                 .get_active_env()?
                 .create_rpc_client(Duration::from_secs(DEFAULT_EXPIRATION_SECS), None)
                 .await?;
@@ -85,13 +144,21 @@ impl WalletContext {
         action: MoveAction,
     ) -> RoochResult<RoochTransactionData> {
         let client = self.get_client().await?;
-
+        let chain_id = client.rooch.get_chain_id().await?;
         let sequence_number = client
+            .rooch
             .get_sequence_number(sender)
             .await
             .map_err(RoochError::from)?;
         log::debug!("use sequence_number: {}", sequence_number);
-        let tx_data = RoochTransactionData::new(sender, sequence_number, action);
+        //TODO max gas amount from cli option or dry run estimate
+        let tx_data = RoochTransactionData::new(
+            sender,
+            sequence_number,
+            chain_id,
+            GasConfig::DEFAULT_MAX_GAS_AMOUNT,
+            action,
+        );
         Ok(tx_data)
     }
 
@@ -99,27 +166,24 @@ impl WalletContext {
         &self,
         sender: RoochAddress,
         action: MoveAction,
-        scheme: BuiltinScheme,
+        password: Option<String>,
     ) -> RoochResult<RoochTransaction> {
         let kp = self
-            .config
             .keystore
-            .get_key_pair_by_scheme(&sender, scheme)
+            .get_key_pair_with_password(&sender, password)
             .ok()
             .ok_or_else(|| {
-                RoochError::SignMessageError(format!("Cannot find key for address: [{sender}]"))
+                RoochError::SignMessageError(format!(
+                    "Cannot find encryption data for address: [{sender}]"
+                ))
             })?;
 
         let tx_data = self.build_tx_data(sender, action).await?;
-        let signature = Signature::new_hashed(tx_data.hash().as_bytes(), kp);
-        let auth = match kp.public().scheme() {
-            BuiltinScheme::Ed25519 => Authenticator::ed25519(signature),
-            BuiltinScheme::Ecdsa => Authenticator::ecdsa(signature),
-            BuiltinScheme::EcdsaRecoverable => Authenticator::ecdsa_recoverable(signature),
-            BuiltinScheme::MultiEd25519 => todo!(),
-            BuiltinScheme::Schnorr => Authenticator::schnorr(signature),
-        };
-        Ok(RoochTransaction::new(tx_data, auth))
+        let signature = Signature::new_hashed(tx_data.hash().as_bytes(), &kp);
+        Ok(RoochTransaction::new(
+            tx_data,
+            Authenticator::rooch(signature),
+        ))
     }
 
     pub async fn execute(
@@ -128,6 +192,7 @@ impl WalletContext {
     ) -> RoochResult<ExecuteTransactionResponseView> {
         let client = self.get_client().await?;
         client
+            .rooch
             .execute_tx(tx)
             .await
             .map_err(|e| RoochError::TransactionError(e.to_string()))
@@ -137,29 +202,10 @@ impl WalletContext {
         &self,
         sender: RoochAddress,
         action: MoveAction,
-        scheme: BuiltinScheme,
+        password: Option<String>,
     ) -> RoochResult<ExecuteTransactionResponseView> {
-        let tx = self.sign(sender, action, scheme).await?;
+        let tx = self.sign(sender, action, password).await?;
         self.execute(tx).await
-    }
-
-    fn parse(&self, account: String) -> Result<AccountAddress, RoochError> {
-        if account.starts_with("0x") {
-            AccountAddress::from_hex_literal(&account).map_err(|err| {
-                RoochError::CommandArgumentError(format!("Failed to parse AccountAddress {}", err))
-            })
-        } else if let Ok(account_address) = AccountAddress::from_str(&account) {
-            Ok(account_address)
-        } else {
-            let address = match account.as_str() {
-                "default" => AccountAddress::from(self.config.active_address.unwrap()),
-                _ => Err(RoochError::CommandArgumentError(
-                    "Use rooch init configuration".to_owned(),
-                ))?,
-            };
-
-            Ok(address)
-        }
     }
 
     pub fn assert_execute_success(

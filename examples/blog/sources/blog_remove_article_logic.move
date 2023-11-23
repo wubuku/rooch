@@ -1,17 +1,20 @@
+// Copyright (c) RoochNetwork
+// SPDX-License-Identifier: Apache-2.0
+
 module rooch_examples::blog_remove_article_logic {
-    use std::vector;
-    use moveos_std::object_id::ObjectID;
+    use moveos_std::object::ObjectID;
+    use moveos_std::object::Object;
+    use moveos_std::table;
     use rooch_examples::article_removed_from_blog;
     use rooch_examples::blog;
+    use rooch_examples::article::Article;
 
     friend rooch_examples::blog_aggregate;
 
     public(friend) fun verify(
-        //storage_ctx: &mut StorageContext,
         article_id: ObjectID,
         blog: &blog::Blog,
     ): blog::ArticleRemovedFromBlog {
-        //let _ = storage_ctx;
         blog::new_article_removed_from_blog(
             blog,
             article_id,
@@ -19,17 +22,11 @@ module rooch_examples::blog_remove_article_logic {
     }
 
     public(friend) fun mutate(
-        //storage_ctx: &mut StorageContext,
         article_removed_from_blog: &blog::ArticleRemovedFromBlog,
         blog: &mut blog::Blog,
-    ) {
-        //let _ = storage_ctx;
+    ) : Object<Article> {
         let article_id = article_removed_from_blog::article_id(article_removed_from_blog);
-        let articles = blog::articles(blog);
-        let (found, idx) = vector::index_of(&articles, &article_id);
-        if (found) {
-            vector::remove(&mut articles, idx);
-            blog::set_articles(blog, articles);
-        };
+        let articles = blog::articles_mut(blog);
+        table::remove(articles, article_id)
     }
 }

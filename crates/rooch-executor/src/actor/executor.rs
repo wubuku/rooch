@@ -3,47 +3,61 @@
 
 use super::messages::{
     AnnotatedStatesMessage, ExecuteTransactionMessage, ExecuteTransactionResult,
-    ExecuteViewFunctionMessage, GetEventsByEventHandleMessage, GetEventsMessage, ResolveMessage,
-    StatesMessage, ValidateTransactionMessage,
+    ExecuteViewFunctionMessage, GetAnnotatedEventsByEventHandleMessage,
+    GetEventsByEventHandleMessage, ResolveMessage, StatesMessage, ValidateTransactionMessage,
 };
 use crate::actor::messages::{
-    GetTransactionInfosByTxHashMessage, GetTxSeqMappingByTxOrderMessage,
-    ListAnnotatedStatesMessage, ListStatesMessage,
+    GetEventsByEventIDsMessage, GetTxExecutionInfosByHashMessage, ListAnnotatedStatesMessage,
+    ListStatesMessage,
 };
 use accumulator::inmemory::InMemoryAccumulator;
 use anyhow::Result;
 use async_trait::async_trait;
 use coerce::actor::{context::ActorContext, message::Handler, Actor};
+use itertools::Itertools;
+use move_binary_format::errors::{Location, PartialVMError, VMResult};
 use move_core_types::account_address::AccountAddress;
-use move_core_types::vm_status::VMStatus;
+use move_core_types::identifier::{IdentStr, Identifier};
+use move_core_types::language_storage::ModuleId;
+use move_core_types::resolver::ModuleResolver;
+use move_core_types::value::MoveValue;
+use move_core_types::vm_status::{StatusCode, VMStatus};
 use move_resource_viewer::MoveValueAnnotator;
-use moveos::moveos::MoveOS;
+use moveos::gas::table::{initial_cost_schedule, MoveOSGasMeter};
+use moveos::moveos::{GasPaymentAccount, MoveOS};
 use moveos::vm::vm_status_explainer::explain_vm_status;
 use moveos_store::transaction_store::TransactionStore;
 use moveos_store::MoveOSStore;
-use moveos_types::event::AnnotatedMoveOSEvent;
-use moveos_types::event::EventHandle;
 use moveos_types::function_return_value::AnnotatedFunctionResult;
 use moveos_types::function_return_value::AnnotatedFunctionReturnValue;
+use moveos_types::genesis_info::GenesisInfo;
+use moveos_types::h256::H256;
 use moveos_types::module_binding::MoveFunctionCaller;
-use moveos_types::move_types::as_struct_tag;
+use moveos_types::move_types::FunctionId;
+use moveos_types::moveos_std::event::EventHandle;
+use moveos_types::moveos_std::event::{AnnotatedEvent, Event};
+use moveos_types::moveos_std::tx_context::TxContext;
 use moveos_types::state::{AnnotatedState, State};
 use moveos_types::state_resolver::{AnnotatedStateReader, StateReader};
-use moveos_types::transaction::FunctionCall;
-use moveos_types::transaction::TransactionExecutionInfo;
 use moveos_types::transaction::VerifiedMoveOSTransaction;
-use moveos_types::tx_context::TxContext;
+use moveos_types::transaction::{FunctionCall, MoveAction};
+use moveos_types::transaction::{MoveOSTransaction, TransactionExecutionInfo};
+use moveos_types::transaction::{TransactionOutput, VerifiedMoveAction};
+use moveos_verifier::metadata::load_module_metadata;
 use rooch_genesis::RoochGenesis;
 use rooch_store::RoochStore;
 use rooch_types::address::MultiChainAddress;
 use rooch_types::framework::address_mapping::AddressMapping;
 use rooch_types::framework::auth_validator::AuthValidatorCaller;
 use rooch_types::framework::auth_validator::TxValidateResult;
+use rooch_types::framework::genesis::GenesisContext;
 use rooch_types::framework::transaction_validator::TransactionValidator;
+use rooch_types::framework::{system_post_execute_functions, system_pre_execute_functions};
+use rooch_types::transaction::AbstractTransaction;
 use rooch_types::transaction::AuthenticatorInfo;
-use rooch_types::transaction::{AbstractTransaction, TransactionSequenceMapping};
 
 pub struct ExecutorActor {
+    genesis: RoochGenesis,
     moveos: MoveOS,
     rooch_store: RoochStore,
 }
@@ -52,17 +66,57 @@ type ValidateAuthenticatorResult =
     Result<(TxValidateResult, Vec<FunctionCall>, Vec<FunctionCall>), VMStatus>;
 
 impl ExecutorActor {
-    pub fn new(moveos_store: MoveOSStore, rooch_store: RoochStore) -> Result<Self> {
-        let genesis: &RoochGenesis = &rooch_genesis::ROOCH_GENESIS;
+    pub fn new(
+        genesis_ctx: GenesisContext,
+        moveos_store: MoveOSStore,
+        rooch_store: RoochStore,
+    ) -> Result<Self> {
+        let genesis: RoochGenesis = rooch_genesis::RoochGenesis::build(genesis_ctx)?;
+        let moveos = MoveOS::new(
+            moveos_store,
+            genesis.all_natives(),
+            genesis.config.clone(),
+            system_pre_execute_functions(),
+            system_post_execute_functions(),
+        )?;
 
-        let mut moveos = MoveOS::new(moveos_store, genesis.all_natives(), genesis.config.clone())?;
-        if moveos.state().is_genesis() {
-            moveos.init_genesis(genesis.genesis_txs())?;
-        }
-        Ok(Self {
+        let executor = Self {
+            genesis,
             moveos,
             rooch_store,
-        })
+        };
+        executor.init_or_check_genesis()
+    }
+
+    fn init_or_check_genesis(mut self) -> Result<Self> {
+        if self.moveos.state().is_genesis() {
+            let genesis_result = self
+                .moveos
+                .init_genesis(self.genesis.genesis_txs(), self.genesis.genesis_ctx())?;
+            let genesis_state_root = genesis_result
+                .last()
+                .expect("Genesis result must not empty")
+                .0;
+
+            //TODO should we save the genesis txs to sequencer?
+            for (genesis_tx, (state_root, genesis_tx_output)) in
+                self.genesis.genesis_txs().into_iter().zip(genesis_result)
+            {
+                let tx_hash = genesis_tx.tx_hash();
+                self.handle_tx_output(tx_hash, state_root, genesis_tx_output)?;
+            }
+
+            debug_assert!(
+                genesis_state_root == self.genesis.genesis_state_root(),
+                "Genesis state root mismatch"
+            );
+            let genesis_info =
+                GenesisInfo::new(self.genesis.genesis_package_hash(), genesis_state_root);
+            self.moveos.config_store().save_genesis(genesis_info)?;
+        } else {
+            self.genesis.check_genesis(self.moveos.config_store())?;
+        }
+        Ok(self)
     }
 
     pub fn resolve_or_generate(
@@ -71,7 +125,7 @@ impl ExecutorActor {
     ) -> Result<AccountAddress> {
         let resolved_sender = {
             let address_mapping = self.moveos.as_module_binding::<AddressMapping>();
-            address_mapping.resovle_or_generate(multi_chain_address_sender)?
+            address_mapping.resolve_or_generate(multi_chain_address_sender)?
         };
 
         Ok(resolved_sender)
@@ -81,11 +135,47 @@ impl ExecutorActor {
         let multi_chain_address_sender = tx.sender();
 
         let resolved_sender = self.resolve_or_generate(multi_chain_address_sender.clone())?;
-        let authenticator = tx.authenticator_info();
+        let authenticator = tx.authenticator_info()?;
 
         let mut moveos_tx = tx.construct_moveos_transaction(resolved_sender)?;
 
         let vm_result = self.validate_authenticator(&moveos_tx.ctx, authenticator)?;
+
+        let can_pay_gas = self.validate_gas_function(&moveos_tx)?;
+
+        let mut pay_by_module_account = false;
+        let mut gas_payment_account = moveos_tx.ctx.sender;
+
+        if let Some(pay_gas) = can_pay_gas {
+            if pay_gas {
+                let account_balance = self.get_account_balance(&moveos_tx)?;
+                let module_account = {
+                    match &moveos_tx.action {
+                        MoveAction::Function(call) => Some(*call.function_id.module_id.address()),
+                        _ => None,
+                    }
+                };
+
+                let gas_payment_address = {
+                    if account_balance >= moveos_tx.ctx.max_gas_amount as u128 {
+                        pay_by_module_account = true;
+                        module_account.unwrap()
+                    } else {
+                        moveos_tx.ctx.sender
+                    }
+                };
+
+                gas_payment_account = gas_payment_address;
+            }
+        }
+
+        moveos_tx
+            .ctx
+            .add(GasPaymentAccount {
+                account: gas_payment_account,
+                pay_gas_by_module_account: pay_by_module_account,
+            })
+            .expect("adding GasPaymentAccount to tx context failed.");
 
         match vm_result {
             Ok((tx_validate_result, pre_execute_functions, post_execute_functions)) => {
@@ -126,6 +216,7 @@ impl ExecutorActor {
         let tx_validate_function_result = tx_validator
             .validate(ctx, authenticator.clone())?
             .into_result();
+
         let vm_result = match tx_validate_function_result {
             Ok(tx_validate_result) => {
                 let auth_validator_option = tx_validate_result.auth_validator();
@@ -138,16 +229,12 @@ impl ExecutorActor {
                             .into_result();
                         match auth_validator_function_result {
                             Ok(_) => {
-                                // pre_execute_function: TransactionValidator first, then AuthValidator
-                                let pre_execute_functions = vec![
-                                    TransactionValidator::pre_execute_function_call(),
-                                    auth_validator_caller.pre_execute_function_call(),
-                                ];
-                                // post_execute_function: AuthValidator first, then TransactionValidator
-                                let post_execute_functions = vec![
-                                    auth_validator_caller.post_execute_function_call(),
-                                    TransactionValidator::post_execute_function_call(),
-                                ];
+                                // pre_execute_function: AuthValidator
+                                let pre_execute_functions =
+                                    vec![auth_validator_caller.pre_execute_function_call()];
+                                // post_execute_function: AuthValidator
+                                let post_execute_functions =
+                                    vec![auth_validator_caller.post_execute_function_call()];
                                 Ok((
                                     tx_validate_result,
                                     pre_execute_functions,
@@ -158,10 +245,8 @@ impl ExecutorActor {
                         }
                     }
                     None => {
-                        let pre_execute_functions =
-                            vec![TransactionValidator::pre_execute_function_call()];
-                        let post_execute_functions =
-                            vec![TransactionValidator::post_execute_function_call()];
+                        let pre_execute_functions = vec![];
+                        let post_execute_functions = vec![];
                         Ok((
                             tx_validate_result,
                             pre_execute_functions,
@@ -175,6 +260,171 @@ impl ExecutorActor {
         Ok(vm_result)
     }
 
+    pub fn validate_gas_function(&self, tx: &MoveOSTransaction) -> VMResult<Option<bool>> {
+        let MoveOSTransaction { ctx, .. } = tx;
+
+        let cost_table = initial_cost_schedule();
+        let mut gas_meter = MoveOSGasMeter::new(cost_table, ctx.max_gas_amount);
+        gas_meter.set_metering(false);
+
+        let verified_moveos_action = self.moveos().verify(tx.clone())?;
+        let verified_action = verified_moveos_action.action;
+
+        match verified_action {
+            VerifiedMoveAction::Function { call } => {
+                let module_id = &call.function_id.module_id;
+                let loaded_module_bytes_result =
+                    self.moveos().moveos_resolver().get_module(module_id);
+                let loaded_module_bytes = match loaded_module_bytes_result {
+                    Ok(loaded_module_bytes_opt) => match loaded_module_bytes_opt {
+                        None => {
+                            return Err(PartialVMError::new(StatusCode::RESOURCE_DOES_NOT_EXIST)
+                                .with_message(
+                                    "The name of the gas_validate_function does not exist."
+                                        .to_string(),
+                                )
+                                .finish(Location::Module(module_id.clone())));
+                        }
+                        Some(module_bytes) => module_bytes,
+                    },
+                    Err(error) => {
+                        return Err(PartialVMError::new(StatusCode::RESOURCE_DOES_NOT_EXIST)
+                            .with_message(format!(
+                                "Load module data from module_id {:} was failed {:}.",
+                                module_id.clone(),
+                                error
+                            ))
+                            .finish(Location::Module(module_id.clone())));
+                    }
+                };
+
+                let module_metadata = load_module_metadata(module_id, Ok(loaded_module_bytes))?;
+                let gas_free_function_info = {
+                    match module_metadata {
+                        None => None,
+                        Some(runtime_metadata) => Some(runtime_metadata.gas_free_function_map),
+                    }
+                };
+
+                let called_function_name = call.function_id.function_name.to_string();
+                match gas_free_function_info {
+                    None => Ok(None),
+                    Some(gas_func_info) => {
+                        let full_called_function = format!(
+                            "0x{}::{}::{}",
+                            call.function_id.module_id.address().to_hex(),
+                            call.function_id.module_id.name(),
+                            called_function_name
+                        );
+                        let gas_func_info_opt = gas_func_info.get(&full_called_function);
+
+                        if let Some(gas_func_info) = gas_func_info_opt {
+                            let gas_validate_func_name = gas_func_info.gas_validate.clone();
+
+                            let split_function = gas_validate_func_name.split("::").collect_vec();
+                            if split_function.len() != 3 {
+                                return Err(PartialVMError::new(StatusCode::VM_EXTENSION_ERROR)
+                                    .with_message(
+                                        "The name of the gas_validate_function is incorrect."
+                                            .to_string(),
+                                    )
+                                    .finish(Location::Module(call.clone().function_id.module_id)));
+                            }
+                            let real_gas_validate_func_name =
+                                split_function.get(2).unwrap().to_string();
+
+                            let gas_validate_func_call = FunctionCall::new(
+                                FunctionId::new(
+                                    call.function_id.module_id.clone(),
+                                    Identifier::new(real_gas_validate_func_name).unwrap(),
+                                ),
+                                vec![],
+                                vec![],
+                            );
+
+                            let function_execution_result =
+                                self.moveos().execute_view_function(gas_validate_func_call);
+
+                            return if function_execution_result.vm_status == VMStatus::Executed {
+                                let return_value = function_execution_result.return_values.unwrap();
+                                if !return_value.is_empty() {
+                                    let first_return_value = return_value.get(0).unwrap();
+                                    Ok(Some(
+                                        bcs::from_bytes::<bool>(first_return_value.value.as_slice())
+                                            .expect(
+                                                "the return value of gas validate function should be bool",
+                                            ),
+                                    ))
+                                } else {
+                                    return Err(PartialVMError::new(
+                                        StatusCode::VM_EXTENSION_ERROR,
+                                    )
+                                    .with_message(
+                                        "the return value of gas_validate_function is empty."
+                                            .to_string(),
+                                    )
+                                    .finish(Location::Module(call.clone().function_id.module_id)));
+                                }
+                            } else {
+                                Ok(None)
+                            };
+                        };
+
+                        Ok(None)
+                    }
+                }
+            }
+            _ => Ok(None),
+        }
+    }
+
+    pub fn get_account_balance(&self, tx: &MoveOSTransaction) -> VMResult<u128> {
+        let MoveOSTransaction { ctx, .. } = tx;
+
+        let cost_table = initial_cost_schedule();
+        let mut gas_meter = MoveOSGasMeter::new(cost_table, ctx.max_gas_amount);
+        gas_meter.set_metering(false);
+
+        let verified_moveos_action = self.moveos().verify(tx.clone())?;
+        let verified_action = verified_moveos_action.action;
+
+        match verified_action {
+            VerifiedMoveAction::Function { call } => {
+                let module_address = call.function_id.module_id.address();
+
+                let gas_coin_module_id = ModuleId::new(
+                    AccountAddress::from_hex_literal("0x3").unwrap(),
+                    Identifier::from(IdentStr::new("gas_coin").unwrap()),
+                );
+                let gas_balance_func_call = FunctionCall::new(
+                    FunctionId::new(gas_coin_module_id, Identifier::new("balance").unwrap()),
+                    vec![],
+                    vec![MoveValue::Address(*module_address)
+                        .simple_serialize()
+                        .unwrap()],
+                );
+
+                let function_execution_result =
+                    self.moveos().execute_view_function(gas_balance_func_call);
+
+                if function_execution_result.vm_status == VMStatus::Executed {
+                    let return_value = function_execution_result.return_values.unwrap();
+                    let first_return_value = return_value.get(0).unwrap();
+
+                    let balance = bcs::from_bytes::<move_core_types::u256::U256>(
+                        first_return_value.value.as_slice(),
+                    )
+                    .expect("the return value of gas validate function should be u128");
+
+                    Ok(balance.unchecked_as_u128())
+                } else {
+                    Ok(0)
+                }
+            }
+            _ => Ok(0),
+        }
+    }
+
     pub fn get_rooch_store(&self) -> RoochStore {
         self.rooch_store.clone()
     }
@@ -186,6 +436,15 @@ impl ExecutorActor {
     pub fn execute(&mut self, tx: VerifiedMoveOSTransaction) -> Result<ExecuteTransactionResult> {
         let tx_hash = tx.ctx.tx_hash();
         let (state_root, output) = self.moveos.execute_and_apply(tx)?;
+        self.handle_tx_output(tx_hash, state_root, output)
+    }
+
+    fn handle_tx_output(
+        &mut self,
+        tx_hash: H256,
+        state_root: H256,
+        output: TransactionOutput,
+    ) -> Result<ExecuteTransactionResult> {
         let event_hashes: Vec<_> = output.events.iter().map(|e| e.hash()).collect();
         let event_root = InMemoryAccumulator::from_leaves(event_hashes.as_slice()).root_hash();
 
@@ -193,12 +452,12 @@ impl ExecutorActor {
             tx_hash,
             state_root,
             event_root,
-            0,
+            output.gas_used,
             output.status.clone(),
         );
         self.moveos
             .transaction_store()
-            .save_tx_exec_info(transaction_info.clone())
+            .save_tx_execution_info(transaction_info.clone())
             .map_err(|e| {
                 anyhow::anyhow!(
                     "ExecuteTransactionMessage handler save tx info failed: {:?} {}",
@@ -257,10 +516,10 @@ impl Handler<ExecuteViewFunctionMessage> for ExecutorActor {
                     values
                         .into_iter()
                         .map(|v| {
-                            let move_value = resoler.view_value(&v.type_tag, &v.value)?;
+                            let decoded_value = resoler.view_value(&v.type_tag, &v.value)?;
                             Ok(AnnotatedFunctionReturnValue {
                                 value: v,
-                                move_value,
+                                decoded_value,
                             })
                         })
                         .collect::<Result<Vec<AnnotatedFunctionReturnValue>, anyhow::Error>>()?,
@@ -312,7 +571,7 @@ impl Handler<ListStatesMessage> for ExecutorActor {
         &mut self,
         msg: ListStatesMessage,
         _ctx: &mut ActorContext,
-    ) -> Result<Vec<Option<(Vec<u8>, State)>>, anyhow::Error> {
+    ) -> Result<Vec<(Vec<u8>, State)>, anyhow::Error> {
         let statedb = self.moveos.moveos_resolver();
         statedb.list_states(msg.access_path, msg.cursor, msg.limit)
     }
@@ -324,9 +583,38 @@ impl Handler<ListAnnotatedStatesMessage> for ExecutorActor {
         &mut self,
         msg: ListAnnotatedStatesMessage,
         _ctx: &mut ActorContext,
-    ) -> Result<Vec<Option<(Vec<u8>, AnnotatedState)>>, anyhow::Error> {
+    ) -> Result<Vec<(Vec<u8>, AnnotatedState)>, anyhow::Error> {
         let statedb = self.moveos.moveos_resolver();
         statedb.list_annotated_states(msg.access_path, msg.cursor, msg.limit)
+    }
+}
+
+#[async_trait]
+impl Handler<GetAnnotatedEventsByEventHandleMessage> for ExecutorActor {
+    async fn handle(
+        &mut self,
+        msg: GetAnnotatedEventsByEventHandleMessage,
+        _ctx: &mut ActorContext,
+    ) -> Result<Vec<AnnotatedEvent>> {
+        let GetAnnotatedEventsByEventHandleMessage {
+            event_handle_type,
+            cursor,
+            limit,
+        } = msg;
+        let event_store = self.moveos.event_store();
+        let resolver = self.moveos.moveos_resolver();
+
+        let event_handle_id = EventHandle::derive_event_handle_id(&event_handle_type);
+        let events = event_store.get_events_by_event_handle_id(&event_handle_id, cursor, limit)?;
+
+        events
+            .into_iter()
+            .map(|event| {
+                let event_move_value = MoveValueAnnotator::new(resolver)
+                    .view_resource(&event_handle_type, event.event_data())?;
+                Ok(AnnotatedEvent::new(event, event_move_value))
+            })
+            .collect::<Result<Vec<_>>>()
     }
 }
 
@@ -336,94 +624,55 @@ impl Handler<GetEventsByEventHandleMessage> for ExecutorActor {
         &mut self,
         msg: GetEventsByEventHandleMessage,
         _ctx: &mut ActorContext,
-    ) -> Result<Vec<Option<AnnotatedMoveOSEvent>>> {
+    ) -> Result<Vec<Event>> {
         let GetEventsByEventHandleMessage {
             event_handle_type,
             cursor,
             limit,
         } = msg;
         let event_store = self.moveos.event_store();
-        let resolver = self.moveos.moveos_resolver();
 
-        let event_handle_id = EventHandle::derive_event_handle_id(event_handle_type.clone());
-        let events = event_store.get_events_by_event_handle_id(&event_handle_id, cursor, limit)?;
-
-        // for ev in events
-        let result = events
-            .into_iter()
-            // .enumerate()
-            .map(|event| {
-                let state = State::new(event.event_data.clone(), event.type_tag.clone());
-                let annotated_event_data = MoveValueAnnotator::new(resolver)
-                    .view_resource(&event_handle_type, state.value.as_slice())
-                    .unwrap();
-                Some(AnnotatedMoveOSEvent::new(
-                    event,
-                    annotated_event_data,
-                    None,
-                    None,
-                ))
-            })
-            .collect();
-        Ok(result)
+        let event_handle_id = EventHandle::derive_event_handle_id(&event_handle_type);
+        event_store.get_events_by_event_handle_id(&event_handle_id, cursor, limit)
     }
 }
 
 #[async_trait]
-impl Handler<GetEventsMessage> for ExecutorActor {
+impl Handler<GetEventsByEventIDsMessage> for ExecutorActor {
     async fn handle(
         &mut self,
-        msg: GetEventsMessage,
+        msg: GetEventsByEventIDsMessage,
         _ctx: &mut ActorContext,
-    ) -> Result<Vec<Option<AnnotatedMoveOSEvent>>> {
-        let GetEventsMessage { filter } = msg;
+    ) -> Result<Vec<Option<AnnotatedEvent>>> {
+        let GetEventsByEventIDsMessage { event_ids } = msg;
         let event_store = self.moveos.event_store();
         let resolver = self.moveos.moveos_resolver();
-        //TODO handle tx hash
-        let mut result: Vec<Option<AnnotatedMoveOSEvent>> = Vec::new();
-        let events = event_store.get_events_with_filter(filter)?;
-        for ev in events
+
+        event_store
+            .multi_get_events(event_ids)?
             .into_iter()
-            .enumerate()
-            .map(|(_i, event)| {
-                let state = State::new(event.event_data.clone(), event.type_tag.clone());
-                let struct_tag = as_struct_tag(event.type_tag.clone()).unwrap();
-                let annotated_event_data = MoveValueAnnotator::new(resolver)
-                    .view_resource(&struct_tag, state.value.as_slice())
-                    .unwrap();
-                AnnotatedMoveOSEvent::new(event, annotated_event_data, None, None)
+            .map(|v| match v {
+                Some(event) => {
+                    let event_move_value = MoveValueAnnotator::new(resolver)
+                        .view_resource(event.event_type(), event.event_data())?;
+                    Ok(Some(AnnotatedEvent::new(event, event_move_value)))
+                }
+                None => Ok(None),
             })
-            .collect::<Vec<_>>()
-        {
-            result.push(Some(ev));
-        }
-        Ok(result)
+            .collect::<Result<Vec<_>>>()
     }
 }
 
 #[async_trait]
-impl Handler<GetTxSeqMappingByTxOrderMessage> for ExecutorActor {
+impl Handler<GetTxExecutionInfosByHashMessage> for ExecutorActor {
     async fn handle(
         &mut self,
-        msg: GetTxSeqMappingByTxOrderMessage,
-        _ctx: &mut ActorContext,
-    ) -> Result<Vec<TransactionSequenceMapping>> {
-        let GetTxSeqMappingByTxOrderMessage { cursor, limit } = msg;
-        let rooch_tx_store = self.rooch_store.get_transaction_store();
-        rooch_tx_store.get_tx_seq_mapping_by_tx_order(cursor, limit)
-    }
-}
-
-#[async_trait]
-impl Handler<GetTransactionInfosByTxHashMessage> for ExecutorActor {
-    async fn handle(
-        &mut self,
-        msg: GetTransactionInfosByTxHashMessage,
+        msg: GetTxExecutionInfosByHashMessage,
         _ctx: &mut ActorContext,
     ) -> Result<Vec<Option<TransactionExecutionInfo>>> {
-        let GetTransactionInfosByTxHashMessage { tx_hashes } = msg;
+        let GetTxExecutionInfosByHashMessage { tx_hashes } = msg;
         self.moveos
             .transaction_store()
-            .multi_get_tx_exec_infos(tx_hashes)
+            .multi_get_tx_execution_infos(tx_hashes)
     }
 }

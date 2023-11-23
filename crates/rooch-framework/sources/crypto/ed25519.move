@@ -1,46 +1,18 @@
-module rooch_framework::ed25519 {
-    use std::vector;
+// Copyright (c) RoochNetwork
+// SPDX-License-Identifier: Apache-2.0
 
+module rooch_framework::ed25519 {
     /// constant codes
-    const V_ED25519_TO_NATIVE_SCHEME_LENGTH: u64 = 1;
-    const V_ED25519_PUBKEY_LENGTH: u64 = 32;
-    const V_ED25519_SIG_LENGTH: u64 = 64;
+    const ED25519_PUBKEY_LENGTH: u64 = 32;
+    const ED25519_SIG_LENGTH: u64 = 64;
 
     /// built-in functions
-    public fun scheme_length(): u64 {
-        V_ED25519_TO_NATIVE_SCHEME_LENGTH
-    }
-
     public fun public_key_length(): u64 {
-        V_ED25519_PUBKEY_LENGTH
+        ED25519_PUBKEY_LENGTH
     }
 
     public fun signature_length(): u64 {
-        V_ED25519_SIG_LENGTH
-    }
-
-    public fun get_public_key_from_authenticator_payload(authenticator_payload: &vector<u8>): vector<u8> {
-        let public_key = vector::empty<u8>();
-        let i = scheme_length() + signature_length();
-        let public_key_position = scheme_length() + signature_length() + public_key_length();
-        while (i < public_key_position) {
-            let value = vector::borrow(authenticator_payload, i);
-            vector::push_back(&mut public_key, *value);
-            i = i + 1;
-        };
-        public_key
-    }
-
-    public fun get_signature_from_authenticator_payload(authenticator_payload: &vector<u8>): vector<u8> {
-        let sign = vector::empty<u8>();
-        let i = scheme_length();
-        let signature_position = signature_length() + 1;
-        while (i < signature_position) {
-            let value = vector::borrow(authenticator_payload, i);
-            vector::push_back(&mut sign, *value);
-            i = i + 1;
-        };
-        sign
+        ED25519_SIG_LENGTH
     }
 
     /// @param signature: 32-byte signature that is a point on the Ed25519 elliptic curve.

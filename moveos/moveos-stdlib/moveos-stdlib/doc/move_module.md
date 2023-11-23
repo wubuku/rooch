@@ -7,13 +7,34 @@
 
 
 -  [Struct `MoveModule`](#0x2_move_module_MoveModule)
+-  [Constants](#@Constants_0)
 -  [Function `new`](#0x2_move_module_new)
+-  [Function `new_batch`](#0x2_move_module_new_batch)
+-  [Function `into_byte_codes_batch`](#0x2_move_module_into_byte_codes_batch)
 -  [Function `module_name`](#0x2_move_module_module_name)
--  [Function `verify_modules`](#0x2_move_module_verify_modules)
+-  [Function `sort_and_verify_modules`](#0x2_move_module_sort_and_verify_modules)
+-  [Function `check_comatibility`](#0x2_move_module_check_comatibility)
+-  [Function `binding_module_address`](#0x2_move_module_binding_module_address)
+-  [Function `replace_module_identiner`](#0x2_move_module_replace_module_identiner)
+-  [Function `replace_struct_identifier`](#0x2_move_module_replace_struct_identifier)
+-  [Function `replace_constant_string`](#0x2_move_module_replace_constant_string)
+-  [Function `replace_constant_address`](#0x2_move_module_replace_constant_address)
+-  [Function `replace_constant_u8`](#0x2_move_module_replace_constant_u8)
+-  [Function `replace_constant_u64`](#0x2_move_module_replace_constant_u64)
+-  [Function `replace_constant_u256`](#0x2_move_module_replace_constant_u256)
 -  [Function `request_init_functions`](#0x2_move_module_request_init_functions)
+-  [Function `replace_address_identifiers`](#0x2_move_module_replace_address_identifiers)
+-  [Function `replace_identifiers`](#0x2_move_module_replace_identifiers)
+-  [Function `replace_addresses_constant`](#0x2_move_module_replace_addresses_constant)
+-  [Function `replace_bytes_constant`](#0x2_move_module_replace_bytes_constant)
+-  [Function `replace_u8_constant`](#0x2_move_module_replace_u8_constant)
+-  [Function `replace_u64_constant`](#0x2_move_module_replace_u64_constant)
+-  [Function `replace_u256_constant`](#0x2_move_module_replace_u256_constant)
 
 
-<pre><code><b>use</b> <a href="">0x1::string</a>;
+<pre><code><b>use</b> <a href="">0x1::error</a>;
+<b>use</b> <a href="">0x1::string</a>;
+<b>use</b> <a href="">0x1::vector</a>;
 </code></pre>
 
 
@@ -29,21 +50,50 @@
 
 
 
-<details>
-<summary>Fields</summary>
+<a name="@Constants_0"></a>
+
+## Constants
 
 
-<dl>
-<dt>
-<code>byte_codes: <a href="">vector</a>&lt;u8&gt;</code>
-</dt>
-<dd>
+<a name="0x2_move_module_ErrorAddressNotMatchWithSigner"></a>
 
-</dd>
-</dl>
+Module address is not the same as the signer
 
 
-</details>
+<pre><code><b>const</b> <a href="move_module.md#0x2_move_module_ErrorAddressNotMatchWithSigner">ErrorAddressNotMatchWithSigner</a>: u64 = 1;
+</code></pre>
+
+
+
+<a name="0x2_move_module_ErrorLengthNotMatch"></a>
+
+Vector length not match
+
+
+<pre><code><b>const</b> <a href="move_module.md#0x2_move_module_ErrorLengthNotMatch">ErrorLengthNotMatch</a>: u64 = 4;
+</code></pre>
+
+
+
+<a name="0x2_move_module_ErrorModuleIncompatible"></a>
+
+Module incompatible with the old ones.
+
+
+<pre><code><b>const</b> <a href="move_module.md#0x2_move_module_ErrorModuleIncompatible">ErrorModuleIncompatible</a>: u64 = 3;
+</code></pre>
+
+
+
+<a name="0x2_move_module_ErrorModuleVerificationError"></a>
+
+Module verification error
+
+
+<pre><code><b>const</b> <a href="move_module.md#0x2_move_module_ErrorModuleVerificationError">ErrorModuleVerificationError</a>: u64 = 2;
+</code></pre>
+
+
 
 <a name="0x2_move_module_new"></a>
 
@@ -56,20 +106,27 @@
 
 
 
-<details>
-<summary>Implementation</summary>
+<a name="0x2_move_module_new_batch"></a>
+
+## Function `new_batch`
 
 
-<pre><code><b>public</b> <b>fun</b> <a href="move_module.md#0x2_move_module_new">new</a>(byte_codes: <a href="">vector</a>&lt;u8&gt;) : <a href="move_module.md#0x2_move_module_MoveModule">MoveModule</a> {
-    <a href="move_module.md#0x2_move_module_MoveModule">MoveModule</a> {
-        byte_codes,
-    }
-}
+
+<pre><code><b>public</b> <b>fun</b> <a href="move_module.md#0x2_move_module_new_batch">new_batch</a>(byte_codes_batch: <a href="">vector</a>&lt;<a href="">vector</a>&lt;u8&gt;&gt;): <a href="">vector</a>&lt;<a href="move_module.md#0x2_move_module_MoveModule">move_module::MoveModule</a>&gt;
 </code></pre>
 
 
 
-</details>
+<a name="0x2_move_module_into_byte_codes_batch"></a>
+
+## Function `into_byte_codes_batch`
+
+
+
+<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="move_module.md#0x2_move_module_into_byte_codes_batch">into_byte_codes_batch</a>(modules: <a href="">vector</a>&lt;<a href="move_module.md#0x2_move_module_MoveModule">move_module::MoveModule</a>&gt;): <a href="">vector</a>&lt;<a href="">vector</a>&lt;u8&gt;&gt;
+</code></pre>
+
+
 
 <a name="0x2_move_module_module_name"></a>
 
@@ -82,55 +139,131 @@
 
 
 
-<details>
-<summary>Implementation</summary>
+<a name="0x2_move_module_sort_and_verify_modules"></a>
 
+## Function `sort_and_verify_modules`
 
-<pre><code><b>public</b> <b>fun</b> <a href="move_module.md#0x2_move_module_module_name">module_name</a>(<a href="move_module.md#0x2_move_module">move_module</a>: &<a href="move_module.md#0x2_move_module_MoveModule">MoveModule</a>): String {
-    //TODO implement <b>native</b> <b>module</b> name
-    <a href="move_module.md#0x2_move_module_module_name_inner">module_name_inner</a>(&<a href="move_module.md#0x2_move_module">move_module</a>.byte_codes)
-}
-</code></pre>
-
-
-
-</details>
-
-<a name="0x2_move_module_verify_modules"></a>
-
-## Function `verify_modules`
-
-Verifies the modules and returns their names
-This function need to ensure the module's bytecode is valid and the module id is matching the account address.
+Sort modules by dependency order and then verify.
+Return their names and names of the modules with init function if sorted dependency order.
+This function will ensure the module's bytecode is valid and the module id is matching the account address.
 Return
-The first vector is the module names of all the modules.
-The second vector is the module names of the modules with init function.
+1. Module names of all the modules. Order of names is not matching the input, but sorted by module dependency order
+2. Module names of the modules with init function.
 
 
-<pre><code><b>public</b> <b>fun</b> <a href="move_module.md#0x2_move_module_verify_modules">verify_modules</a>(modules: &<a href="">vector</a>&lt;<a href="move_module.md#0x2_move_module_MoveModule">move_module::MoveModule</a>&gt;, account_address: <b>address</b>): (<a href="">vector</a>&lt;<a href="_String">string::String</a>&gt;, <a href="">vector</a>&lt;<a href="_String">string::String</a>&gt;)
+<pre><code><b>public</b> <b>fun</b> <a href="move_module.md#0x2_move_module_sort_and_verify_modules">sort_and_verify_modules</a>(modules: &<a href="">vector</a>&lt;<a href="move_module.md#0x2_move_module_MoveModule">move_module::MoveModule</a>&gt;, account_address: <b>address</b>): (<a href="">vector</a>&lt;<a href="_String">string::String</a>&gt;, <a href="">vector</a>&lt;<a href="_String">string::String</a>&gt;)
 </code></pre>
 
 
 
-<details>
-<summary>Implementation</summary>
+<a name="0x2_move_module_check_comatibility"></a>
+
+## Function `check_comatibility`
+
+Check module compatibility when upgrading
+Abort if the new module is not compatible with the old module.
 
 
-<pre><code><b>public</b> <b>fun</b> <a href="move_module.md#0x2_move_module_verify_modules">verify_modules</a>(modules: &<a href="">vector</a>&lt;<a href="move_module.md#0x2_move_module_MoveModule">MoveModule</a>&gt;, account_address: <b>address</b>): (<a href="">vector</a>&lt;String&gt;, <a href="">vector</a>&lt;String&gt;) {
-    <b>let</b> bytes_vec = <a href="_empty">vector::empty</a>&lt;<a href="">vector</a>&lt;u8&gt;&gt;();
-    <b>let</b> i = 0u64;
-    <b>let</b> len = <a href="_length">vector::length</a>(modules);
-    <b>while</b> (i &lt; len) {
-        <a href="_push_back">vector::push_back</a>(&<b>mut</b> bytes_vec, <a href="_borrow">vector::borrow</a>(modules, i).byte_codes);
-        i = i + 1;
-    };
-    <a href="move_module.md#0x2_move_module_verify_modules_inner">verify_modules_inner</a>(bytes_vec, account_address)
-}
+<pre><code><b>public</b> <b>fun</b> <a href="move_module.md#0x2_move_module_check_comatibility">check_comatibility</a>(new_module: &<a href="move_module.md#0x2_move_module_MoveModule">move_module::MoveModule</a>, old_module: &<a href="move_module.md#0x2_move_module_MoveModule">move_module::MoveModule</a>)
 </code></pre>
 
 
 
-</details>
+<a name="0x2_move_module_binding_module_address"></a>
+
+## Function `binding_module_address`
+
+Binding given module's address to the new address
+
+
+<pre><code><b>public</b> <b>fun</b> <a href="move_module.md#0x2_move_module_binding_module_address">binding_module_address</a>(modules: <a href="">vector</a>&lt;<a href="move_module.md#0x2_move_module_MoveModule">move_module::MoveModule</a>&gt;, old_address: <b>address</b>, new_address: <b>address</b>): <a href="">vector</a>&lt;<a href="move_module.md#0x2_move_module_MoveModule">move_module::MoveModule</a>&gt;
+</code></pre>
+
+
+
+<a name="0x2_move_module_replace_module_identiner"></a>
+
+## Function `replace_module_identiner`
+
+Replace given module's identifier to the new ones
+
+
+<pre><code><b>public</b> <b>fun</b> <a href="move_module.md#0x2_move_module_replace_module_identiner">replace_module_identiner</a>(modules: <a href="">vector</a>&lt;<a href="move_module.md#0x2_move_module_MoveModule">move_module::MoveModule</a>&gt;, old_names: <a href="">vector</a>&lt;<a href="_String">string::String</a>&gt;, new_names: <a href="">vector</a>&lt;<a href="_String">string::String</a>&gt;): <a href="">vector</a>&lt;<a href="move_module.md#0x2_move_module_MoveModule">move_module::MoveModule</a>&gt;
+</code></pre>
+
+
+
+<a name="0x2_move_module_replace_struct_identifier"></a>
+
+## Function `replace_struct_identifier`
+
+Replace given struct's identifier to the new ones
+
+
+<pre><code><b>public</b> <b>fun</b> <a href="move_module.md#0x2_move_module_replace_struct_identifier">replace_struct_identifier</a>(modules: <a href="">vector</a>&lt;<a href="move_module.md#0x2_move_module_MoveModule">move_module::MoveModule</a>&gt;, old_names: <a href="">vector</a>&lt;<a href="_String">string::String</a>&gt;, new_names: <a href="">vector</a>&lt;<a href="_String">string::String</a>&gt;): <a href="">vector</a>&lt;<a href="move_module.md#0x2_move_module_MoveModule">move_module::MoveModule</a>&gt;
+</code></pre>
+
+
+
+<a name="0x2_move_module_replace_constant_string"></a>
+
+## Function `replace_constant_string`
+
+Replace given string constant to the new ones
+
+
+<pre><code><b>public</b> <b>fun</b> <a href="move_module.md#0x2_move_module_replace_constant_string">replace_constant_string</a>(modules: <a href="">vector</a>&lt;<a href="move_module.md#0x2_move_module_MoveModule">move_module::MoveModule</a>&gt;, old_strings: <a href="">vector</a>&lt;<a href="_String">string::String</a>&gt;, new_strings: <a href="">vector</a>&lt;<a href="_String">string::String</a>&gt;): <a href="">vector</a>&lt;<a href="move_module.md#0x2_move_module_MoveModule">move_module::MoveModule</a>&gt;
+</code></pre>
+
+
+
+<a name="0x2_move_module_replace_constant_address"></a>
+
+## Function `replace_constant_address`
+
+Replace given address constant to the new ones
+
+
+<pre><code><b>public</b> <b>fun</b> <a href="move_module.md#0x2_move_module_replace_constant_address">replace_constant_address</a>(modules: <a href="">vector</a>&lt;<a href="move_module.md#0x2_move_module_MoveModule">move_module::MoveModule</a>&gt;, old_addresses: <a href="">vector</a>&lt;<b>address</b>&gt;, new_addresses: <a href="">vector</a>&lt;<b>address</b>&gt;): <a href="">vector</a>&lt;<a href="move_module.md#0x2_move_module_MoveModule">move_module::MoveModule</a>&gt;
+</code></pre>
+
+
+
+<a name="0x2_move_module_replace_constant_u8"></a>
+
+## Function `replace_constant_u8`
+
+Replace given u8 constant to the new ones
+
+
+<pre><code><b>public</b> <b>fun</b> <a href="move_module.md#0x2_move_module_replace_constant_u8">replace_constant_u8</a>(modules: <a href="">vector</a>&lt;<a href="move_module.md#0x2_move_module_MoveModule">move_module::MoveModule</a>&gt;, old_u8s: <a href="">vector</a>&lt;u8&gt;, new_u8s: <a href="">vector</a>&lt;u8&gt;): <a href="">vector</a>&lt;<a href="move_module.md#0x2_move_module_MoveModule">move_module::MoveModule</a>&gt;
+</code></pre>
+
+
+
+<a name="0x2_move_module_replace_constant_u64"></a>
+
+## Function `replace_constant_u64`
+
+Replace given u64 constant to the new ones
+
+
+<pre><code><b>public</b> <b>fun</b> <a href="move_module.md#0x2_move_module_replace_constant_u64">replace_constant_u64</a>(modules: <a href="">vector</a>&lt;<a href="move_module.md#0x2_move_module_MoveModule">move_module::MoveModule</a>&gt;, old_u64s: <a href="">vector</a>&lt;u64&gt;, new_u64s: <a href="">vector</a>&lt;u64&gt;): <a href="">vector</a>&lt;<a href="move_module.md#0x2_move_module_MoveModule">move_module::MoveModule</a>&gt;
+</code></pre>
+
+
+
+<a name="0x2_move_module_replace_constant_u256"></a>
+
+## Function `replace_constant_u256`
+
+Replace given u256 constant to the new ones
+
+
+<pre><code><b>public</b> <b>fun</b> <a href="move_module.md#0x2_move_module_replace_constant_u256">replace_constant_u256</a>(modules: <a href="">vector</a>&lt;<a href="move_module.md#0x2_move_module_MoveModule">move_module::MoveModule</a>&gt;, old_u256s: <a href="">vector</a>&lt;u256&gt;, new_u256s: <a href="">vector</a>&lt;u256&gt;): <a href="">vector</a>&lt;<a href="move_module.md#0x2_move_module_MoveModule">move_module::MoveModule</a>&gt;
+</code></pre>
+
+
 
 <a name="0x2_move_module_request_init_functions"></a>
 
@@ -146,13 +279,90 @@ account_address: address of all the modules
 
 
 
-<details>
-<summary>Implementation</summary>
+<a name="0x2_move_module_replace_address_identifiers"></a>
+
+## Function `replace_address_identifiers`
+
+Native function to replace addresses identifier in module binary where the length of
+<code>old_addresses</code> must equal to that of <code>new_addresses</code>.
 
 
-<pre><code><b>native</b> <b>public</b>(<b>friend</b>) <b>fun</b> <a href="move_module.md#0x2_move_module_request_init_functions">request_init_functions</a>(module_names: <a href="">vector</a>&lt;String&gt;, account_address: <b>address</b>);
+<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="move_module.md#0x2_move_module_replace_address_identifiers">replace_address_identifiers</a>(bytes: <a href="">vector</a>&lt;<a href="">vector</a>&lt;u8&gt;&gt;, old_addresses: <a href="">vector</a>&lt;<b>address</b>&gt;, new_addresses: <a href="">vector</a>&lt;<b>address</b>&gt;): <a href="">vector</a>&lt;<a href="">vector</a>&lt;u8&gt;&gt;
 </code></pre>
 
 
 
-</details>
+<a name="0x2_move_module_replace_identifiers"></a>
+
+## Function `replace_identifiers`
+
+Native function to replace the name identifier <code>old_name</code> to <code>new_name</code> in module binary.
+
+
+<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="move_module.md#0x2_move_module_replace_identifiers">replace_identifiers</a>(bytes: <a href="">vector</a>&lt;<a href="">vector</a>&lt;u8&gt;&gt;, old_idents: <a href="">vector</a>&lt;<a href="_String">string::String</a>&gt;, new_idents: <a href="">vector</a>&lt;<a href="_String">string::String</a>&gt;): <a href="">vector</a>&lt;<a href="">vector</a>&lt;u8&gt;&gt;
+</code></pre>
+
+
+
+<a name="0x2_move_module_replace_addresses_constant"></a>
+
+## Function `replace_addresses_constant`
+
+Native function to replace constant addresses in module binary where the length of
+<code>old_addresses</code> must equal to that of <code>new_addresses</code>.
+
+
+<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="move_module.md#0x2_move_module_replace_addresses_constant">replace_addresses_constant</a>(bytes: <a href="">vector</a>&lt;<a href="">vector</a>&lt;u8&gt;&gt;, old_addresses: <a href="">vector</a>&lt;<b>address</b>&gt;, new_addresses: <a href="">vector</a>&lt;<b>address</b>&gt;): <a href="">vector</a>&lt;<a href="">vector</a>&lt;u8&gt;&gt;
+</code></pre>
+
+
+
+<a name="0x2_move_module_replace_bytes_constant"></a>
+
+## Function `replace_bytes_constant`
+
+Native function to replace constant bytes in module binary where the length of
+<code>old_bytes</code> must equal to that of <code>new_bytes</code>.
+
+
+<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="move_module.md#0x2_move_module_replace_bytes_constant">replace_bytes_constant</a>(bytes: <a href="">vector</a>&lt;<a href="">vector</a>&lt;u8&gt;&gt;, old_bytes: <a href="">vector</a>&lt;<a href="">vector</a>&lt;u8&gt;&gt;, new_bytes: <a href="">vector</a>&lt;<a href="">vector</a>&lt;u8&gt;&gt;): <a href="">vector</a>&lt;<a href="">vector</a>&lt;u8&gt;&gt;
+</code></pre>
+
+
+
+<a name="0x2_move_module_replace_u8_constant"></a>
+
+## Function `replace_u8_constant`
+
+Native function to replace constant u8 in module binary where the length of
+<code>old_u8s</code> must equal to that of <code>new_u8s</code>.
+
+
+<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="move_module.md#0x2_move_module_replace_u8_constant">replace_u8_constant</a>(bytes: <a href="">vector</a>&lt;<a href="">vector</a>&lt;u8&gt;&gt;, old_u8s: <a href="">vector</a>&lt;u8&gt;, new_u8s: <a href="">vector</a>&lt;u8&gt;): <a href="">vector</a>&lt;<a href="">vector</a>&lt;u8&gt;&gt;
+</code></pre>
+
+
+
+<a name="0x2_move_module_replace_u64_constant"></a>
+
+## Function `replace_u64_constant`
+
+Native function to replace constant u64 in module binary where the length of
+<code>old_u64s</code> must equal to that of <code>new_u64s</code>.
+
+
+<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="move_module.md#0x2_move_module_replace_u64_constant">replace_u64_constant</a>(bytes: <a href="">vector</a>&lt;<a href="">vector</a>&lt;u8&gt;&gt;, old_u64s: <a href="">vector</a>&lt;u64&gt;, new_u64s: <a href="">vector</a>&lt;u64&gt;): <a href="">vector</a>&lt;<a href="">vector</a>&lt;u8&gt;&gt;
+</code></pre>
+
+
+
+<a name="0x2_move_module_replace_u256_constant"></a>
+
+## Function `replace_u256_constant`
+
+Native function to replace constant u256 in module binary where the length of
+<code>old_u256s</code> must equal to that of <code>new_u256s</code>.
+
+
+<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="move_module.md#0x2_move_module_replace_u256_constant">replace_u256_constant</a>(bytes: <a href="">vector</a>&lt;<a href="">vector</a>&lt;u8&gt;&gt;, old_u256s: <a href="">vector</a>&lt;u256&gt;, new_u256s: <a href="">vector</a>&lt;u256&gt;): <a href="">vector</a>&lt;<a href="">vector</a>&lt;u8&gt;&gt;
+</code></pre>

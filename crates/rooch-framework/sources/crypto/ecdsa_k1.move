@@ -1,37 +1,34 @@
+// Copyright (c) RoochNetwork
+// SPDX-License-Identifier: Apache-2.0
+
 module rooch_framework::ecdsa_k1 {
-    use std::vector;
 
     /// constant codes
-    const V_ECDSA_K1_TO_BITCOIN_SCHEME_LENGTH: u64 = 1;
-    const V_ECDSA_K1_PUBKEY_LENGTH: u64 = 33;
-    const V_ECDSA_K1_SIG_LENGTH: u64 = 64;
+    const ECDSA_K1_TO_BITCOIN_VALIDATOR_ID_LENGTH: u64 = 1;
+    const ECDSA_K1_COMPRESSED_PUBKEY_LENGTH: u64 = 33;
+    const ECDSA_K1_SIG_LENGTH: u64 = 64;
 
     /// Hash function name that are valid for ecrecover and verify.
-    const KECCAK256: u8 = 0;
     const SHA256: u8 = 1;
     const RIPEMD160: u8 = 2;
 
     /// Error if the signature is invalid.
-    const EInvalidSignature: u64 = 0;
+    const ErrorInvalidSignature: u64 = 1;
 
     /// Error if the public key is invalid.
-    const EInvalidPubKey: u64 = 1;
+    const ErrorInvalidPubKey: u64 = 2;
 
     /// built-in functions
-    public fun scheme_length(): u64 {
-        V_ECDSA_K1_TO_BITCOIN_SCHEME_LENGTH
+    public fun auth_validator_id_length(): u64 {
+        ECDSA_K1_TO_BITCOIN_VALIDATOR_ID_LENGTH
     }
 
     public fun public_key_length(): u64 {
-        V_ECDSA_K1_PUBKEY_LENGTH
+        ECDSA_K1_COMPRESSED_PUBKEY_LENGTH
     }
 
     public fun signature_length(): u64 {
-        V_ECDSA_K1_SIG_LENGTH
-    }
-
-    public fun keccak256(): u8 {
-        KECCAK256
+        ECDSA_K1_SIG_LENGTH
     }
 
     public fun sha256(): u8 {
@@ -40,30 +37,6 @@ module rooch_framework::ecdsa_k1 {
 
     public fun ripemd160(): u8 {
         RIPEMD160
-    }
-
-    public fun get_public_key_from_authenticator_payload(authenticator_payload: &vector<u8>): vector<u8> {
-        let public_key = vector::empty<u8>();
-        let i = scheme_length() + signature_length();
-        let public_key_position = scheme_length() + signature_length() + public_key_length();
-        while (i < public_key_position) {
-            let value = vector::borrow(authenticator_payload, i);
-            vector::push_back(&mut public_key, *value);
-            i = i + 1;
-        };
-        public_key
-    }
-
-    public fun get_signature_from_authenticator_payload(authenticator_payload: &vector<u8>): vector<u8> {
-        let sign = vector::empty<u8>();
-        let i = scheme_length();
-        let signature_position = signature_length() + 1;
-        while (i < signature_position) {
-            let value = vector::borrow(authenticator_payload, i);
-            vector::push_back(&mut sign, *value);
-            i = i + 1;
-        };
-        sign
     }
 
     /// @param signature: A 64-bytes signature in form (r, s) that is signed using
@@ -90,7 +63,7 @@ module rooch_framework::ecdsa_k1 {
     }
 
     #[test]
-    #[expected_failure(abort_code = EInvalidSignature)]
+    #[expected_failure(location=Self, abort_code = 65537)] // std::error::invalid_argument(ErrorInvalidSignature)
     fun test_verify_fails_invalid_sig() {
         let msg = x"00010203";
         let pubkey = x"033e99a541db69bd32040dfe5037fbf5210dafa8151a71e21c5204b05d95ce0a62";
@@ -99,7 +72,7 @@ module rooch_framework::ecdsa_k1 {
     }
 
     #[test]
-    #[expected_failure(abort_code = EInvalidPubKey)]
+    #[expected_failure(location=Self, abort_code = 65538)] // std::error::invalid_argument(ErrorInvalidPubKey)
     fun test_verify_fails_invalid_pubkey() {
         let msg = x"00010203";
         let pubkey = x"";

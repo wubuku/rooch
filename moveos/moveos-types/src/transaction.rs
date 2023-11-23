@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    event::Event, h256, h256::H256, move_types::FunctionId, moveos_std::tx_meta::TxMeta,
-    state::StateChangeSet, tx_context::TxContext,
+    gas_config::GasConfig, h256, h256::H256, move_types::FunctionId,
+    moveos_std::event::TransactionEvent, moveos_std::tx_context::TxContext,
+    moveos_std::tx_meta::TxMeta, state::StateChangeSet,
 };
 use move_core_types::{
     account_address::AccountAddress,
@@ -16,6 +17,7 @@ use std::fmt::Display;
 
 #[cfg(any(test, feature = "fuzzing"))]
 use crate::move_types::type_tag_prop_strategy;
+use crate::moveos_std::event::{Event, EventID};
 #[cfg(any(test, feature = "fuzzing"))]
 use move_core_types::identifier::Identifier;
 #[cfg(any(test, feature = "fuzzing"))]
@@ -121,6 +123,14 @@ impl MoveAction {
         }
     }
 
+    pub fn action_name(&self) -> String {
+        match self {
+            MoveAction::Script(_) => "Script".to_string(),
+            MoveAction::Function(_) => "Function".to_string(),
+            MoveAction::ModuleBundle(_) => "ModuleBundle".to_string(),
+        }
+    }
+
     pub fn new_module_bundle(modules: Vec<Vec<u8>>) -> Self {
         Self::ModuleBundle(modules)
     }
@@ -142,10 +152,29 @@ impl MoveAction {
             args,
         })
     }
+
+    // Serialize the MoveAction enum into bytes using BCS
+    pub fn encode(&self) -> Result<Vec<u8>, anyhow::Error> {
+        let encoded_data = bcs::to_bytes(self).expect("Serialization should succeed");
+        Ok(encoded_data)
+    }
+}
+
+impl From<VerifiedMoveAction> for MoveAction {
+    fn from(verified_action: VerifiedMoveAction) -> Self {
+        match verified_action {
+            VerifiedMoveAction::Script { call } => MoveAction::Script(call),
+            VerifiedMoveAction::Function { call } => MoveAction::Function(call),
+            VerifiedMoveAction::ModuleBundle {
+                module_bundle,
+                init_function_modules: _init_function_modules,
+            } => MoveAction::ModuleBundle(module_bundle),
+        }
+    }
 }
 
 /// The MoveAction after verifier
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum VerifiedMoveAction {
     Script {
         call: ScriptCall,
@@ -199,7 +228,13 @@ impl MoveOSTransaction {
     pub fn new_for_test(sender: AccountAddress, action: MoveAction) -> Self {
         let sender_and_action = (sender, action);
         let tx_hash = h256::sha3_256_of(bcs::to_bytes(&sender_and_action).unwrap().as_slice());
-        let ctx = TxContext::new(sender_and_action.0, tx_hash);
+        //TODO pass the sequence_number
+        let ctx = TxContext::new(
+            sender_and_action.0,
+            0,
+            GasConfig::DEFAULT_MAX_GAS_AMOUNT,
+            tx_hash,
+        );
         Self::new(ctx, sender_and_action.1)
     }
 
@@ -223,7 +258,7 @@ impl MoveOSTransaction {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VerifiedMoveOSTransaction {
     pub ctx: TxContext,
     pub action: VerifiedMoveAction,
@@ -231,7 +266,18 @@ pub struct VerifiedMoveOSTransaction {
     pub post_execute_functions: Vec<FunctionCall>,
 }
 
-/// TransactionOutput is the execution result of a MoveOS transaction
+/// RawTransactionOutput is the execution result of a MoveOS transaction
+//TODO make RawTransactionOutput serializable
+#[derive(Debug, Clone)]
+pub struct RawTransactionOutput {
+    pub status: KeptVMStatus,
+    pub changeset: ChangeSet,
+    pub state_changeset: StateChangeSet,
+    pub events: Vec<TransactionEvent>,
+    pub gas_used: u64,
+}
+
+/// TransactionOutput is the execution result of a MoveOS transaction, and pack TransactionEvent to Event
 //TODO make TransactionOutput serializable
 #[derive(Debug, Clone)]
 pub struct TransactionOutput {
@@ -240,6 +286,31 @@ pub struct TransactionOutput {
     pub state_changeset: StateChangeSet,
     pub events: Vec<Event>,
     pub gas_used: u64,
+}
+
+impl TransactionOutput {
+    pub fn new(transaction_output: RawTransactionOutput, event_ids: Vec<EventID>) -> Self {
+        debug_assert!(
+            transaction_output.events.len() == event_ids.len(),
+            "Transaction events len mismatch events len"
+        );
+
+        let events = transaction_output
+            .events
+            .clone()
+            .into_iter()
+            .enumerate()
+            .map(|(index, event)| Event::new_with_event_id(event_ids[index], event))
+            .collect::<Vec<_>>();
+
+        TransactionOutput {
+            status: transaction_output.status,
+            changeset: transaction_output.changeset,
+            state_changeset: transaction_output.state_changeset,
+            events,
+            gas_used: transaction_output.gas_used,
+        }
+    }
 }
 
 /// `TransactionExecutionInfo` represents the result of executing a transaction.

@@ -1,7 +1,7 @@
 // Copyright (c) RoochNetwork
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::jsonrpc_types::StrView;
+use crate::jsonrpc_types::{BytesView, StrView};
 use anyhow::Result;
 use move_core_types::{
     account_address::AccountAddress,
@@ -10,29 +10,19 @@ use move_core_types::{
     u256,
 };
 use move_resource_viewer::{AnnotatedMoveStruct, AnnotatedMoveValue};
-use moveos_types::event::{Event, EventID};
+use moveos_types::move_std::string::MoveString;
 use moveos_types::move_types::parse_module_id;
+use moveos_types::moveos_std::type_info::TypeInfo;
 use moveos_types::transaction::MoveAction;
 use moveos_types::{
     access_path::AccessPath,
-    event_filter::EventFilter,
-    h256::H256,
     move_types::FunctionId,
-    object::{AnnotatedObject, ObjectID},
-    serde::Readable,
+    moveos_std::object::{AnnotatedObject, ObjectID},
     transaction::{FunctionCall, ScriptCall},
 };
-
-use fastcrypto::encoding::Hex;
-use serde_with::serde_as;
-
-use moveos_types::{
-    move_string::{MoveAsciiString, MoveString},
-    state::MoveStructState,
-};
+use moveos_types::{move_std::ascii::MoveAsciiString, state::MoveStructType};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
@@ -41,9 +31,33 @@ pub type TypeTagView = StrView<TypeTag>;
 pub type StructTagView = StrView<StructTag>;
 pub type FunctionIdView = StrView<FunctionId>;
 pub type AccessPathView = StrView<AccessPath>;
+pub type IdentifierView = StrView<Identifier>;
+
+impl_str_view_for! {TypeTag StructTag FunctionId AccessPath Identifier}
+
 pub type AccountAddressView = StrView<AccountAddress>;
 
-impl_str_view_for! {TypeTag StructTag FunctionId AccessPath}
+impl std::fmt::Display for AccountAddressView {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        //Ensure append `0x` before the address, and output full address
+        //The Display implemention of AccountAddress has not `0x` prefix
+        write!(f, "{:#x}", self.0)
+    }
+}
+
+impl FromStr for AccountAddressView {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // AccountAddress::from_str suppport both 0xADDRESS and ADDRESS
+        Ok(StrView(AccountAddress::from_str(s)?))
+    }
+}
+
+impl From<AccountAddressView> for AccountAddress {
+    fn from(value: AccountAddressView) -> Self {
+        value.0
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct AnnotatedMoveStructView {
@@ -68,25 +82,6 @@ impl From<AnnotatedMoveStruct> for AnnotatedMoveStructView {
     }
 }
 
-// impl TryFrom<AnnotatedMoveStructView> for AnnotatedMoveStruct {
-//     type Error = anyhow::Error;
-
-//     fn try_from(value: AnnotatedMoveStructView) -> Result<Self, Self::Error> {
-//         Ok(Self {
-//             abilities: AbilitySet::from_u8(value.abilities)
-//                 .ok_or_else(|| anyhow::anyhow!("invalid abilities:{}", value.abilities))?,
-//             type_: value.type_.0,
-//             value: value
-//                 .value
-//                 .into_iter()
-//                 .map(|(k, v)| {
-//                     Ok::<(Identifier, AnnotatedMoveValue), anyhow::Error>((k, v.try_into()?))
-//                 })
-//                 .collect::<Result<_, _>>()?,
-//         })
-//     }
-// }
-
 /// Some specific struct that we want to display in a special way for better readability
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
@@ -98,15 +93,15 @@ pub enum SpecificStructView {
 
 impl SpecificStructView {
     pub fn try_from_annotated(move_struct: AnnotatedMoveStruct) -> Option<Self> {
-        if MoveString::type_match(&move_struct.type_) {
+        if MoveString::struct_tag_match(&move_struct.type_) {
             MoveString::try_from(move_struct)
                 .ok()
                 .map(SpecificStructView::MoveString)
-        } else if MoveAsciiString::type_match(&move_struct.type_) {
+        } else if MoveAsciiString::struct_tag_match(&move_struct.type_) {
             MoveAsciiString::try_from(move_struct)
                 .ok()
                 .map(SpecificStructView::MoveAsciiString)
-        } else if ObjectID::type_match(&move_struct.type_) {
+        } else if ObjectID::struct_tag_match(&move_struct.type_) {
             ObjectID::try_from(move_struct)
                 .ok()
                 .map(SpecificStructView::ObjectID)
@@ -127,7 +122,7 @@ pub enum AnnotatedMoveValueView {
     Bool(bool),
     Address(AccountAddressView),
     Vector(Vec<AnnotatedMoveValueView>),
-    Bytes(StrView<Vec<u8>>),
+    Bytes(BytesView),
     Struct(AnnotatedMoveStructView),
     SpecificStruct(SpecificStructView),
     U16(u16),
@@ -160,7 +155,7 @@ impl From<AnnotatedMoveValue> for AnnotatedMoveValueView {
     }
 }
 
-//TODO should we support convert from AnnotatedMoveValueView to AnnotatedMoveValue?
+//We can not support convert from AnnotatedMoveValueView to AnnotatedMoveValue
 // It is not easy to implement because:
 // 1. We need to put type_tag in the Vector
 // 2. We need to support convert SpecificStruct to AnnotatedMoveStruct
@@ -213,9 +208,9 @@ impl From<AnnotatedObject> for AnnotatedObjectView {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ScriptCallView {
-    pub code: StrView<Vec<u8>>,
+    pub code: BytesView,
     pub ty_args: Vec<TypeTagView>,
-    pub args: Vec<StrView<Vec<u8>>>,
+    pub args: Vec<BytesView>,
 }
 
 impl From<ScriptCall> for ScriptCallView {
@@ -242,7 +237,7 @@ impl From<ScriptCallView> for ScriptCall {
 pub struct FunctionCallView {
     pub function_id: FunctionIdView,
     pub ty_args: Vec<TypeTagView>,
-    pub args: Vec<StrView<Vec<u8>>>,
+    pub args: Vec<BytesView>,
 }
 
 impl From<FunctionCall> for FunctionCallView {
@@ -272,7 +267,7 @@ pub struct MoveActionView {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub script_call: Option<ScriptCallView>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub module_bundle: Option<Vec<StrView<Vec<u8>>>>,
+    pub module_bundle: Option<Vec<BytesView>>,
 }
 
 impl From<MoveAction> for MoveActionView {
@@ -343,150 +338,39 @@ impl FromStr for StrView<ModuleId> {
     }
 }
 
-// #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
-// #[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
-// pub struct Identifier(Box<str>);
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TypeInfoView {
+    pub account_address: AccountAddress,
+    pub module_name: BytesView,
+    pub struct_name: BytesView,
+}
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-pub struct IdentifierView(String);
-
-impl From<Identifier> for IdentifierView {
-    fn from(value: Identifier) -> Self {
-        IdentifierView(value.into_string())
+impl std::fmt::Display for TypeInfoView {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}::{:?}::{:?}",
+            &self.account_address, self.module_name, &self.struct_name
+        )
     }
 }
 
-impl From<IdentifierView> for Identifier {
-    fn from(value: IdentifierView) -> Self {
-        Identifier::new(value.0).unwrap()
-    }
-}
-
-#[serde_as]
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct H256View(
-    #[schemars(with = "Hex")]
-    #[serde_as(as = "Readable<Hex, _>")]
-    [u8; 32],
-);
-
-impl From<H256> for H256View {
-    fn from(value: H256) -> Self {
-        H256View(value.0)
-    }
-}
-
-impl From<H256View> for H256 {
-    fn from(value: H256View) -> Self {
-        H256(value.0)
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-pub enum EventFilterView {
-    /// Query by sender address.
-    Sender(AccountAddressView),
-    /// Return events emitted by the given transaction.
-    Transaction(
-        ///tx hash of the transaction
-        H256View,
-    ),
-    /// Return events with the given move event struct name
-    MoveEventType(
-        // #[schemars(with = "String")]
-        // #[serde_as(as = "TypeTag")]
-        TypeTagView,
-    ),
-    MoveEventField {
-        path: String,
-        value: Value,
-    },
-    /// Return events emitted in [start_time, end_time) interval
-    // #[serde(rename_all = "camelCase")]
-    TimeRange {
-        /// left endpoint of time interval, milliseconds since epoch, inclusive
-        // #[schemars(with = "u64")]
-        // #[serde_as(as = "u64")]
-        start_time: u64,
-        /// right endpoint of time interval, milliseconds since epoch, exclusive
-        // #[schemars(with = "u64")]
-        // #[serde_as(as = "u64")]
-        end_time: u64,
-    },
-    /// Return events emitted in [from_block, to_block) interval
-    // #[serde(rename_all = "camelCase")]
-    // BlockRange {
-    //     /// left endpoint of block height, inclusive
-    //     // #[schemars(with = "u64")]
-    //     // #[serde_as(as = "u64")]
-    //     from_block: u64, //TODO use BlockNumber
-    //     /// right endpoint of block height, exclusive
-    //     // #[schemars(with = "u64")]
-    //     // #[serde_as(as = "u64")]
-    //     to_block: u64, //TODO use BlockNumber
-    // },
-    All(Vec<EventFilterView>),
-    Any(Vec<EventFilterView>),
-    And(Box<EventFilterView>, Box<EventFilterView>),
-    Or(Box<EventFilterView>, Box<EventFilterView>),
-}
-
-impl From<EventFilterView> for EventFilter {
-    fn from(value: EventFilterView) -> Self {
-        match value {
-            EventFilterView::Sender(address) => Self::Sender(address.into()),
-            EventFilterView::Transaction(tx_hash) => Self::Transaction(tx_hash.into()),
-            EventFilterView::MoveEventType(type_tag) => Self::MoveEventType(type_tag.into()),
-            EventFilterView::MoveEventField { path, value } => Self::MoveEventField { path, value },
-            EventFilterView::TimeRange {
-                start_time,
-                end_time,
-            } => Self::TimeRange {
-                start_time,
-                end_time,
-            },
-            EventFilterView::All(filters) => {
-                Self::All(filters.into_iter().map(|f| f.into()).collect())
-            }
-            EventFilterView::Any(filters) => {
-                Self::Any(filters.into_iter().map(|f| f.into()).collect())
-            }
-            EventFilterView::And(left, right) => {
-                Self::And(Box::new((*left).into()), Box::new((*right).into()))
-            }
-            EventFilterView::Or(left, right) => {
-                Self::Or(Box::new((*left).into()), Box::new((*right).into()))
-            }
+impl From<TypeInfo> for TypeInfoView {
+    fn from(type_info: TypeInfo) -> Self {
+        TypeInfoView {
+            account_address: type_info.account_address,
+            module_name: type_info.module_name.into(),
+            struct_name: type_info.struct_name.into(),
         }
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-pub struct EventView {
-    pub event_id: EventID,
-    pub type_tag: TypeTagView,
-    pub event_data: StrView<Vec<u8>>,
-    pub event_index: u64,
-}
-
-impl From<Event> for EventView {
-    fn from(event: Event) -> Self {
-        EventView {
-            event_id: event.event_id,
-            type_tag: event.type_tag.into(),
-            event_data: StrView(event.event_data),
-            event_index: event.event_index,
-        }
-    }
-}
-
-impl From<EventView> for Event {
-    fn from(event: EventView) -> Self {
-        Event {
-            event_id: event.event_id,
-            type_tag: event.type_tag.into(),
-            event_data: event.event_data.0,
-            event_index: event.event_index,
+impl From<TypeInfoView> for TypeInfo {
+    fn from(type_info: TypeInfoView) -> Self {
+        TypeInfo {
+            account_address: type_info.account_address,
+            module_name: type_info.module_name.into(),
+            struct_name: type_info.struct_name.into(),
         }
     }
 }

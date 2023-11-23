@@ -1,14 +1,17 @@
+// Copyright (c) RoochNetwork
+// SPDX-License-Identifier: Apache-2.0
+
 /// Source from https://github.com/aptos-labs/aptos-core/blob/main/aptos-move/framework/aptos-stdlib/sources/copyable_any.move
 
 module moveos_std::copyable_any {
-    use moveos_std::type_info;
-    use moveos_std::bcs;
+    
     use std::error;
     use std::string::String;
+    use moveos_std::type_info;
+    use moveos_std::bcs;
 
-    //TODO unify the Error codes
     /// The type provided for `unpack` is not the same as was given for `pack`.
-    const ETYPE_MISMATCH: u64 = 0;
+    const ErrorTypeMismatch: u64 = 1;
 
     /// The same as `any::Any` but with the copy ability.
     struct Any has drop, store, copy {
@@ -27,8 +30,8 @@ module moveos_std::copyable_any {
 
     /// Unpack a value from the `Any` representation. This aborts if the value has not the expected type `T`.
     public fun unpack<T>(x: Any): T {
-        assert!(type_info::type_name<T>() == x.type_name, error::invalid_argument(ETYPE_MISMATCH));
-        bcs::from_bytes<T>(x.data)
+        assert!(type_info::type_name<T>() == x.type_name, error::invalid_argument(ErrorTypeMismatch));
+        bcs::native_from_bytes<T>(x.data)
     }
 
     /// Returns the type name of this Any

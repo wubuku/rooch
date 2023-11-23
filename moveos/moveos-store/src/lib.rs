@@ -5,23 +5,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use anyhow::{Error, Result};
+use moveos_types::genesis_info::GenesisInfo;
 use once_cell::sync::Lazy;
 use raw_store::{ColumnFamilyName, StoreInstance};
 use std::collections::BTreeMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 
-use crate::config_store::{ConfigStore, StartupInfoDBStore};
+use crate::config_store::{ConfigDBStore, ConfigStore};
 use crate::event_store::{EventDBStore, EventStore};
 use crate::state_store::statedb::StateDBStore;
 use crate::state_store::NodeDBStore;
 use crate::transaction_store::{TransactionDBStore, TransactionStore};
-use move_core_types::language_storage::TypeTag;
+use move_core_types::language_storage::StructTag;
 use moveos_config::store_config::RocksdbConfig;
-use moveos_types::event::{Event, EventID};
-use moveos_types::event_filter::EventFilter;
 use moveos_types::h256::H256;
-use moveos_types::object::ObjectID;
+use moveos_types::moveos_std::event::{Event, EventID, TransactionEvent};
+use moveos_types::moveos_std::object::ObjectID;
 use moveos_types::startup_info::StartupInfo;
 use moveos_types::state::State;
 use moveos_types::state_resolver::StateResolver;
@@ -41,8 +41,9 @@ pub mod transaction_store;
 pub const STATE_NODE_PREFIX_NAME: ColumnFamilyName = "state_node";
 pub const TRANSACTION_PREFIX_NAME: ColumnFamilyName = "transaction";
 pub const EVENT_PREFIX_NAME: ColumnFamilyName = "event";
-pub const EVENT_INDEX_PREFIX_NAME: ColumnFamilyName = "event_index";
-pub const CONFIG_PREFIX_NAME: ColumnFamilyName = "config";
+pub const EVENT_HANDLE_PREFIX_NAME: ColumnFamilyName = "event_handle";
+pub const CONFIG_STARTUP_INFO_PREFIX_NAME: ColumnFamilyName = "config_startup_info";
+pub const CONFIG_GENESIS_PREFIX_NAME: ColumnFamilyName = "config_genesis";
 
 ///db store use prefix_name vec to init
 /// Please note that adding a prefix needs to be added in vec simultaneously, remember！！
@@ -51,8 +52,9 @@ static VEC_PREFIX_NAME: Lazy<Vec<ColumnFamilyName>> = Lazy::new(|| {
         STATE_NODE_PREFIX_NAME,
         TRANSACTION_PREFIX_NAME,
         EVENT_PREFIX_NAME,
-        EVENT_INDEX_PREFIX_NAME,
-        CONFIG_PREFIX_NAME,
+        EVENT_HANDLE_PREFIX_NAME,
+        CONFIG_STARTUP_INFO_PREFIX_NAME,
+        CONFIG_GENESIS_PREFIX_NAME,
     ]
 });
 
@@ -69,7 +71,7 @@ pub struct MoveOSDB {
     pub node_store: NodeDBStore,
     pub event_store: EventDBStore,
     pub transaction_store: TransactionDBStore,
-    pub config_store: StartupInfoDBStore,
+    pub config_store: ConfigDBStore,
 }
 
 impl MoveOSDB {
@@ -95,7 +97,7 @@ impl MoveOSDB {
             node_store: NodeDBStore::new(instance.clone()),
             event_store: EventDBStore::new(instance.clone()),
             transaction_store: TransactionDBStore::new(instance.clone()),
-            config_store: StartupInfoDBStore::new(instance),
+            config_store: ConfigDBStore::new(instance),
         };
         Ok(store)
     }
@@ -140,7 +142,7 @@ impl MoveOSStore {
         &self.moveosdb.node_store
     }
 
-    pub fn get_config_store(&self) -> &StartupInfoDBStore {
+    pub fn get_config_store(&self) -> &ConfigDBStore {
         &self.moveosdb.config_store
     }
 
@@ -180,11 +182,7 @@ impl NodeStore for MoveOSStore {
 }
 
 impl EventStore for MoveOSStore {
-    fn save_event(&self, event: Event) -> Result<()> {
-        self.get_event_store().save_event(event)
-    }
-
-    fn save_events(&self, events: Vec<Event>) -> Result<()> {
+    fn save_events(&self, events: Vec<TransactionEvent>) -> Result<Vec<EventID>> {
         self.get_event_store().save_events(events)
     }
 
@@ -192,8 +190,8 @@ impl EventStore for MoveOSStore {
         self.get_event_store().get_event(event_id)
     }
 
-    fn get_events_by_tx_hash(&self, tx_hash: &H256) -> Result<Vec<Event>> {
-        self.get_event_store().get_events_by_tx_hash(tx_hash)
+    fn multi_get_events(&self, event_ids: Vec<EventID>) -> Result<Vec<Option<Event>>> {
+        self.get_event_store().multi_get_events(event_ids)
     }
 
     fn get_events_by_event_handle_id(
@@ -206,31 +204,33 @@ impl EventStore for MoveOSStore {
             .get_events_by_event_handle_id(event_handle_id, cursor, limit)
     }
 
-    fn get_events_by_event_handle_type(&self, event_handle_type: &TypeTag) -> Result<Vec<Event>> {
+    fn get_events_by_event_handle_type(
+        &self,
+        event_handle_type: &StructTag,
+        cursor: Option<u64>,
+        limit: u64,
+    ) -> Result<Vec<Event>> {
         self.get_event_store()
-            .get_events_by_event_handle_type(event_handle_type)
-    }
-
-    fn get_events_with_filter(&self, filter: EventFilter) -> Result<Vec<Event>> {
-        self.get_event_store().get_events_with_filter(filter)
+            .get_events_by_event_handle_type(event_handle_type, cursor, limit)
     }
 }
 
 impl TransactionStore for MoveOSStore {
-    fn save_tx_exec_info(&self, tx_exec_info: TransactionExecutionInfo) -> Result<()> {
-        self.get_transaction_store().save_tx_exec_info(tx_exec_info)
+    fn save_tx_execution_info(&self, tx_execution_info: TransactionExecutionInfo) -> Result<()> {
+        self.get_transaction_store()
+            .save_tx_execution_info(tx_execution_info)
     }
 
-    fn get_tx_exec_info(&self, tx_hash: H256) -> Result<Option<TransactionExecutionInfo>> {
-        self.get_transaction_store().get_tx_exec_info(tx_hash)
+    fn get_tx_execution_info(&self, tx_hash: H256) -> Result<Option<TransactionExecutionInfo>> {
+        self.get_transaction_store().get_tx_execution_info(tx_hash)
     }
 
-    fn multi_get_tx_exec_infos(
+    fn multi_get_tx_execution_infos(
         &self,
         tx_hashes: Vec<H256>,
     ) -> Result<Vec<Option<TransactionExecutionInfo>>> {
         self.get_transaction_store()
-            .multi_get_tx_exec_infos(tx_hashes)
+            .multi_get_tx_execution_infos(tx_hashes)
     }
 }
 
@@ -241,6 +241,14 @@ impl ConfigStore for MoveOSStore {
 
     fn save_startup_info(&self, startup_info: StartupInfo) -> Result<()> {
         self.get_config_store().save_startup_info(startup_info)
+    }
+
+    fn get_genesis(&self) -> Result<Option<GenesisInfo>> {
+        self.get_config_store().get_genesis()
+    }
+
+    fn save_genesis(&self, genesis_info: GenesisInfo) -> Result<()> {
+        self.get_config_store().save_genesis(genesis_info)
     }
 }
 
@@ -275,20 +283,20 @@ impl<'a, T: 'a + NodeStore> IntoSuper<dyn NodeStore + 'a> for T {
 impl Store for MoveOSStore {}
 
 impl StateResolver for MoveOSStore {
-    fn resolve_state(
+    fn resolve_table_item(
         &self,
         handle: &ObjectID,
         key: &[u8],
     ) -> std::result::Result<Option<State>, Error> {
-        self.statedb.resolve_state(handle, key)
+        self.statedb.resolve_table_item(handle, key)
     }
 
-    fn resolve_list_state(
+    fn list_table_items(
         &self,
         handle: &ObjectID,
         cursor: Option<Vec<u8>>,
         limit: usize,
-    ) -> std::result::Result<Vec<Option<(Vec<u8>, State)>>, Error> {
-        self.statedb.resolve_list_state(handle, cursor, limit)
+    ) -> std::result::Result<Vec<(Vec<u8>, State)>, Error> {
+        self.statedb.list_table_items(handle, cursor, limit)
     }
 }

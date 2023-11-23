@@ -1,14 +1,12 @@
 // Copyright (c) RoochNetwork
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{
-    addresses::MOVEOS_STD_ADDRESS,
-    object::{self, AnnotatedObject, Object, ObjectID, RawObject},
-};
+use crate::moveos_std::object::{AnnotatedObject, ObjectEntity, ObjectID, RawObject};
 use anyhow::{bail, ensure, Result};
 use move_core_types::{
     account_address::AccountAddress,
     effects::Op,
+    ident_str,
     identifier::{IdentStr, Identifier},
     language_storage::{StructTag, TypeTag},
     resolver::MoveResolver,
@@ -16,6 +14,7 @@ use move_core_types::{
     value::{MoveStructLayout, MoveTypeLayout, MoveValue},
 };
 use move_resource_viewer::{AnnotatedMoveValue, MoveValueAnnotator};
+use move_vm_types::values::Value;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use smt::UpdateSet;
 use std::collections::{btree_map, BTreeMap, BTreeSet};
@@ -33,15 +32,23 @@ pub struct State {
 /// The rust representation of a Move value
 pub trait MoveType {
     fn type_tag() -> TypeTag;
+
+    fn type_tag_match(type_tag: &TypeTag) -> bool {
+        type_tag == &Self::type_tag()
+    }
 }
 
 /// The rust representation of a Move Struct
 /// This trait copy from `move_core_types::move_resource::MoveStructType`
 /// For auto implement `MoveType` to `MoveStructType`
-pub trait MoveStructType {
+pub trait MoveStructType: MoveType {
     const ADDRESS: AccountAddress = move_core_types::language_storage::CORE_CODE_ADDRESS;
     const MODULE_NAME: &'static IdentStr;
     const STRUCT_NAME: &'static IdentStr;
+
+    fn module_address() -> AccountAddress {
+        Self::ADDRESS
+    }
 
     fn module_identifier() -> Identifier {
         Self::MODULE_NAME.to_owned()
@@ -64,14 +71,59 @@ pub trait MoveStructType {
         }
     }
 
-    fn type_tag() -> TypeTag {
-        TypeTag::Struct(Box::new(Self::struct_tag()))
+    /// Check the `struct_tag` argument is match Self::struct_tag
+    fn struct_tag_match(struct_tag: &StructTag) -> bool {
+        struct_tag == &Self::struct_tag()
+    }
+
+    /// Check the `struct_tag` argument is match Self::struct_tag, but ignore the type param.
+    fn struct_tag_match_without_type_param(struct_tag: &StructTag) -> bool {
+        struct_tag.address == Self::ADDRESS
+            && struct_tag.module == Self::module_identifier()
+            && struct_tag.name == Self::struct_identifier()
+    }
+}
+
+fn type_layout_match(first_layout: &MoveTypeLayout, second_layout: &MoveTypeLayout) -> bool {
+    match (first_layout, second_layout) {
+        (MoveTypeLayout::Address, MoveTypeLayout::Address) => true,
+        (MoveTypeLayout::Signer, MoveTypeLayout::Signer) => true,
+        (MoveTypeLayout::Bool, MoveTypeLayout::Bool) => true,
+        (MoveTypeLayout::U8, MoveTypeLayout::U8) => true,
+        (MoveTypeLayout::U16, MoveTypeLayout::U16) => true,
+        (MoveTypeLayout::U32, MoveTypeLayout::U32) => true,
+        (MoveTypeLayout::U64, MoveTypeLayout::U64) => true,
+        (MoveTypeLayout::U128, MoveTypeLayout::U128) => true,
+        (MoveTypeLayout::U256, MoveTypeLayout::U256) => true,
+        (
+            MoveTypeLayout::Vector(first_inner_layout),
+            MoveTypeLayout::Vector(second_inner_layout),
+        ) => type_layout_match(first_inner_layout, second_inner_layout),
+        (
+            MoveTypeLayout::Struct(first_struct_layout),
+            MoveTypeLayout::Struct(second_struct_layout),
+        ) => {
+            if first_struct_layout.fields().len() != second_struct_layout.fields().len() {
+                false
+            } else {
+                first_struct_layout
+                    .fields()
+                    .iter()
+                    .zip(second_struct_layout.fields().iter())
+                    .all(|(first_field, second_field)| type_layout_match(first_field, second_field))
+            }
+        }
+        (_, _) => false,
     }
 }
 
 /// The rust representation of a Move value state
 pub trait MoveState: MoveType + DeserializeOwned + Serialize {
     fn type_layout() -> MoveTypeLayout;
+    fn type_layout_match(other_type_layout: &MoveTypeLayout) -> bool {
+        let self_layout = Self::type_layout();
+        type_layout_match(&self_layout, other_type_layout)
+    }
     fn from_bytes(bytes: &[u8]) -> Result<Self>
     where
         Self: Sized,
@@ -90,6 +142,28 @@ pub trait MoveState: MoveType + DeserializeOwned + Serialize {
         let blob = self.to_bytes();
         MoveValue::simple_deserialize(&blob, &Self::type_layout())
             .expect("Deserialize the MoveValue from MoveState should success")
+    }
+
+    fn to_runtime_value(&self) -> Value {
+        let blob = self.to_bytes();
+        Value::simple_deserialize(&blob, &Self::type_layout())
+            .expect("Deserialize the Move Runtime Value from MoveState should success")
+    }
+
+    /// Deserialize the MoveState from MoveRuntime Value
+    fn from_runtime_value(value: Value) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        let blob = value
+            .simple_serialize(&Self::type_layout())
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Serialize the MoveState from Value error: {:?}",
+                    Self::type_tag()
+                )
+            })?;
+        Self::from_bytes(&blob)
     }
 }
 
@@ -224,30 +298,24 @@ where
     }
 }
 
+/// A placeholder struct for unknown Move Struct
+/// Sometimes we need a generic struct type, but we don't know the struct type
+pub struct PlaceholderStruct;
+
+impl MoveStructType for PlaceholderStruct {
+    const ADDRESS: AccountAddress = AccountAddress::ZERO;
+    const MODULE_NAME: &'static IdentStr = ident_str!("placeholder");
+    const STRUCT_NAME: &'static IdentStr = ident_str!("PlaceholderStruct");
+
+    fn type_params() -> Vec<TypeTag> {
+        panic!("PlaceholderStruct should not be used as a type")
+    }
+}
+
 /// Move State is a trait that is used to represent the state of a Move Resource in Rust
 /// It is like the `MoveResource` in move_core_types
-pub trait MoveStructState: MoveStructType + DeserializeOwned + Serialize {
-    fn type_layout() -> MoveTypeLayout {
-        MoveTypeLayout::Struct(Self::struct_layout())
-    }
+pub trait MoveStructState: MoveState + MoveStructType + DeserializeOwned + Serialize {
     fn struct_layout() -> MoveStructLayout;
-    fn type_match(type_tag: &StructTag) -> bool {
-        type_tag == &Self::struct_tag()
-    }
-    fn from_bytes(bytes: &[u8]) -> Result<Self>
-    where
-        Self: Sized,
-    {
-        bcs::from_bytes(bytes)
-            .map_err(|e| anyhow::anyhow!("Deserialize the MoveState error: {:?}", e))
-    }
-    fn to_bytes(&self) -> Vec<u8> {
-        bcs::to_bytes(self).expect("Serialize the MoveState should success")
-    }
-    fn into_state(self) -> State {
-        let value = self.to_bytes();
-        State::new(value, TypeTag::Struct(Box::new(Self::struct_tag())))
-    }
 }
 
 impl<T> From<T> for State
@@ -258,6 +326,8 @@ where
         state.into_state()
     }
 }
+
+pub trait MoveRuntimeValue {}
 
 impl State {
     pub fn new(value: Vec<u8>, value_type: TypeTag) -> Self {
@@ -289,18 +359,17 @@ impl State {
         let val_type = self.value_type();
         match val_type {
             TypeTag::Struct(struct_tag) => {
-                if struct_tag.address == MOVEOS_STD_ADDRESS
-                    && struct_tag.module.as_ident_str() == object::OBJECT_MODULE_NAME
-                    && struct_tag.name.as_ident_str() == object::OBJECT_STRUCT_NAME
-                {
+                if ObjectEntity::<PlaceholderStruct>::struct_tag_match_without_type_param(
+                    struct_tag,
+                ) {
                     let object_type_param = struct_tag
                         .type_params
                         .get(0)
-                        .expect("The Object<T> should have a type param");
+                        .expect("The ObjectEntity<T> should have a type param");
                     match object_type_param {
                         TypeTag::Struct(struct_tag) => Some(struct_tag.as_ref().clone()),
                         _ => {
-                            unreachable!("The Object<T> should have a struct type param")
+                            unreachable!("The ObjectEntity<T> should have a struct type param")
                         }
                     }
                 } else {
@@ -311,33 +380,43 @@ impl State {
         }
     }
 
-    pub fn as_object<T>(&self) -> Result<Object<T>>
+    pub fn as_object<T>(&self) -> Result<ObjectEntity<T>>
     where
         T: MoveStructState,
     {
-        self.as_move_state::<Object<T>>()
+        self.cast::<ObjectEntity<T>>()
+    }
+
+    pub fn as_object_uncheck<T>(&self) -> Result<ObjectEntity<T>>
+    where
+        T: DeserializeOwned,
+    {
+        self.cast_unchecked::<ObjectEntity<T>>()
     }
 
     pub fn as_raw_object(&self) -> Result<RawObject> {
         let object_struct_tag = self.get_object_struct_tag().ok_or_else(|| {
-            anyhow::anyhow!("Expect type Object but the state type:{}", self.value_type)
+            anyhow::anyhow!(
+                "Expect type ObjectEntity<T> but the state type:{}",
+                self.value_type
+            )
         })?;
         RawObject::from_bytes(&self.value, object_struct_tag)
     }
 
-    pub fn as_move_state<T>(&self) -> Result<T>
+    /// Case the state to T
+    pub fn cast<T>(&self) -> Result<T>
     where
         T: MoveStructState,
     {
         let val_type = self.value_type();
         match val_type {
             TypeTag::Struct(struct_tag) => {
-                let expect_type = T::struct_tag();
                 //TODO define error code and rasie it to Move
                 ensure!(
-                    struct_tag.as_ref() == &expect_type,
+                    T::struct_tag_match(struct_tag),
                     "Expect type:{} but the state type:{}",
-                    expect_type,
+                    T::struct_tag(),
                     struct_tag
                 );
                 bcs::from_bytes(&self.value).map_err(Into::into)
@@ -346,24 +425,32 @@ impl State {
         }
     }
 
+    /// Directly cast the state to T without type check
+    pub fn cast_unchecked<T: DeserializeOwned>(&self) -> Result<T> {
+        bcs::from_bytes(&self.value).map_err(Into::into)
+    }
+
     pub fn into_annotated_state<T: MoveResolver + ?Sized>(
         self,
         annotator: &MoveValueAnnotator<T>,
     ) -> Result<AnnotatedState> {
-        let move_value = annotator.view_value(&self.value_type, &self.value)?;
-        Ok(AnnotatedState::new(self, move_value))
+        let decoded_value = annotator.view_value(&self.value_type, &self.value)?;
+        Ok(AnnotatedState::new(self, decoded_value))
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct AnnotatedState {
     pub state: State,
-    pub move_value: AnnotatedMoveValue,
+    pub decoded_value: AnnotatedMoveValue,
 }
 
 impl AnnotatedState {
-    pub fn new(state: State, move_value: AnnotatedMoveValue) -> Self {
-        Self { state, move_value }
+    pub fn new(state: State, decoded_value: AnnotatedMoveValue) -> Self {
+        Self {
+            state,
+            decoded_value,
+        }
     }
 
     pub fn into_annotated_object(self) -> Result<AnnotatedObject> {
@@ -373,11 +460,11 @@ impl AnnotatedState {
             self.state.value_type()
         );
 
-        match self.move_value {
+        match self.decoded_value {
             AnnotatedMoveValue::Struct(annotated_move_object) => {
                 AnnotatedObject::new_from_annotated_struct(annotated_move_object)
             }
-            _ => bail!("Expect MoveStruct but found {:?}", self.move_value),
+            _ => bail!("Expect MoveStruct but found {:?}", self.decoded_value),
         }
     }
 }
@@ -425,6 +512,8 @@ impl StateChangeSet {
 pub struct TableChange {
     //TODO should we keep the key's type here?
     pub entries: BTreeMap<Vec<u8>, Op<State>>,
+    /// The size increment of the table, may be negtive which means more deleting than inserting.
+    pub size_increment: i64,
 }
 
 /// StateSet is represent state dump result. Not include events and other stores

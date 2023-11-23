@@ -1,9 +1,9 @@
-<div align="center">
+<div width="400" align="center">
   <br />
   <br />
   <a href="https://rooch.network"><img alt="Rooch" src="https://rooch.network/logo/rooch_black_combine.svg" width=384></a>
   <br />
-  <h3><a href="https://rooch.network">Rooch</a> is Modular DApp Container, with <a href="https://github.com/move-language/move)">Move.</a></h3>
+  <h3><a href="https://rooch.network">Rooch</a> is a Modular Fully on-chain Application Container, with <a href="https://github.com/move-language/move">Move</a> language.</h3>
   <br />
 </div>
 
@@ -13,10 +13,25 @@
 
 ## Usage
 
-* **Multi-Chain Layer2**: Rooch(Execution) + Multi-Chain(Settlement) + Ethereum(Arbitration) + DA
-* **X-Chain Modular DApp**: Rooch(Execution) + X-Chain(Settlement + Arbitration) + DA
-* **Layer3 Modular DApp**: Rooch(Execution) + Rooch Layer2(Settlement + Arbitration) + DA
+* **RoochNetwork(Multi-Chain Modular Layer2)**: Rooch(Execution) + Multi-Chain(Settlement) + Ethereum(Arbitration) + DA
+* **X-Chain Rollup**: Rooch(Execution) + X-Chain(Settlement + Arbitration) + DA
 * **Sovereign Rollup**: Rooch + DA
+
+## Developer Network Information
+
+* Name: dev
+* ChainID: 20230103
+* RPC: https://dev-seed.rooch.network/
+
+Please refer to [Connect to Developer Test Network](https://rooch.network/docs/developer-guides/connect-devnet) for more information.
+
+## MoveStd & MoveosStd & RoochFramework documentation
+
+* std: 0x1 [MoveStdlib](./moveos/moveos-stdlib/move-stdlib/doc)
+* moveos_std: 0x2 [MoveosStdlib](./moveos/moveos-stdlib/moveos-stdlib/doc)
+* rooch_framework: 0x3 [RoochFramework](./crates/rooch-framework/doc/)
+
+Please refer to [Rooch's built-in library](https://rooch.network/docs/developer-guides/library) for more information.
 
 ## Getting Started
 
@@ -44,6 +59,7 @@
     rooch server start
     ```
    * *`RUST_LOG=debug rooch server start` for debugging information*
+   * You can directly use the devnet and skip this step.
 
 6. Publishing the Move project
     ```bash
@@ -57,7 +73,7 @@
 <details>
 <summary>Storage Abstraction</summary>
 
-- [Docs](./docs/website/pages/docs/tech-highlights/storage_abstraction.en-US.mdx)
+- [Docs](https://rooch.network/docs/dive-into-rooch/storage-abstraction)
 
 - Overview:
 
@@ -76,7 +92,7 @@
 <details>
 <summary>Transaction Flow</summary>
 
-- [Docs](./docs/website/pages/docs/tech-highlights/transaction_flow.en-US.mdx)
+- [Docs](https://rooch.network/docs/dive-into-rooch/transaction-flow)
 - Overview:
 ![Rooch Transaction Flow](./docs/website/public/docs/rooch-design-transaction-flow-functional-perspective.svg)
 

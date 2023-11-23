@@ -13,6 +13,10 @@ RUN set -eux; \
         libclang-dev clang \
         llvm \
         lld \
+        libsnappy-dev \
+        g++ \
+        cmake \
+        libsqlite3-dev \
         protobuf-compiler; \
     rm -rf /var/lib/apt/lists/*
 
@@ -29,7 +33,7 @@ RUN set -eux; \
     echo "${RUSTUP_SHA256} *rustup-init" | sha256sum -c -; \
     chmod +x rustup-init
 
-ENV RUST_VERSION=1.68.0
+ENV RUST_VERSION=1.70.0
 
 RUN set -eux; \
     ./rustup-init -y --no-modify-path --default-toolchain $RUST_VERSION; \
@@ -48,6 +52,7 @@ RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
         ca-certificates \
+        libsqlite3-dev \
         libssl-dev; \
     rm -rf /var/lib/apt/lists/*
 

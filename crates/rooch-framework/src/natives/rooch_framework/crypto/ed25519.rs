@@ -16,6 +16,7 @@ use move_vm_types::{
 use crate::natives::helpers::{make_module_natives, make_native};
 use move_vm_runtime::native_functions::{NativeContext, NativeFunction};
 
+use move_core_types::gas_algebra::InternalGas;
 use smallvec::smallvec;
 use std::collections::VecDeque;
 
@@ -27,7 +28,7 @@ use std::collections::VecDeque;
  *              + ed25519_ed25519_verify_msg_cost_per_block * block_size | cost depends on number of blocks in message
  **************************************************************************************************/
 pub fn native_verify(
-    _gas_params: &FromBytesGasParameters,
+    gas_params: &FromBytesGasParameters,
     _context: &mut NativeContext,
     ty_args: Vec<Type>,
     mut args: VecDeque<Value>,
@@ -37,7 +38,7 @@ pub fn native_verify(
 
     // TODO(Gas): Charge the arg size dependent costs
 
-    let cost = 0.into();
+    let cost = gas_params.base;
 
     let msg = pop_arg!(args, VectorRef);
     let msg_ref = msg.as_bytes_ref();
@@ -61,11 +62,13 @@ pub fn native_verify(
 }
 
 #[derive(Debug, Clone)]
-pub struct FromBytesGasParameters {}
+pub struct FromBytesGasParameters {
+    pub base: InternalGas,
+}
 
 impl FromBytesGasParameters {
     pub fn zeros() -> Self {
-        Self {}
+        Self { base: 0.into() }
     }
 }
 

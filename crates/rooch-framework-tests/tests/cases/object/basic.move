@@ -3,78 +3,48 @@
 //# publish
 
 module test::m {
-    use moveos_std::tx_context;
-    use moveos_std::storage_context::{Self, StorageContext};
-    use moveos_std::object;
-    use moveos_std::object_id::ObjectID;
-    use moveos_std::account_storage;
-    use moveos_std::object_storage;
+    use moveos_std::context::{Self, Context};
+    use moveos_std::object::{Self, Object, ObjectID};
     use std::debug;
 
     struct S has store, key { v: u8 }
-    struct Cup<phantom T: store> has store, key { v: u8 }
 
-    public entry fun mint_s(ctx: &mut StorageContext) {
-        let tx_ctx = storage_context::tx_context_mut(ctx);
-        let sender = tx_context::sender(tx_ctx);
-        let tx_hash = tx_context::tx_hash(tx_ctx);
+    public entry fun mint(ctx: &mut Context) {
+        let tx_hash = context::tx_hash(ctx);
         debug::print(&tx_hash);
         // if the tx hash change, need to figure out why.
-        assert!(x"7852c5dcbd87e82102dba0db36d44b5a9fb0006b3e828c0b5f0832f70a8ff6ee" == tx_hash, 1000);
-        let obj = object::new(tx_ctx, sender , S { v: 1});
+        assert!(x"d9ee14951f05eafce05da16395f3acd8324708a3b608ebf13fb41ffcbef87e30" == tx_hash, 1000);
+        let obj = context::new_object(ctx, S { v: 1});
         debug::print(&obj);
-        let object_storage = storage_context::object_storage_mut(ctx);
-        object_storage::add(object_storage, obj);
+        object::transfer(obj, context::sender(ctx));
     }
 
-    public entry fun move_s_to_global(ctx: &mut StorageContext, sender: signer, object_id: ObjectID) {
-        let object_storage = storage_context::object_storage_mut(ctx);
-        debug::print(&object_id);
-        let obj = object_storage::remove<S>(object_storage, object_id);
-        debug::print(&obj);
-        let (_id, _owner, value) = object::unpack(obj);
-        account_storage::global_move_to(ctx, &sender, value);
+    public entry fun update(obj_s: &mut Object<S>){
+        let s = object::borrow_mut(obj_s);
+        s.v = 2;
     }
 
-    public entry fun mint_cup<T: store>(ctx: &mut StorageContext) {
-        let tx_ctx = storage_context::tx_context_mut(ctx);
-        let sender = tx_context::sender(tx_ctx);
-        let obj = object::new(tx_ctx, sender, Cup<T> { v: 2 });
-        debug::print(&obj);
-        let object_storage = storage_context::object_storage_mut(ctx);
-        object_storage::add(object_storage, obj);
+    //We can not use `Object<S>` as transaction argument now, so use ObjectID
+    public entry fun remove(ctx: &mut Context, sender: &signer, obj_s_id: ObjectID) {
+        let obj_s = context::take_object<S>(ctx, sender, obj_s_id);
+        let S{ v } = object::remove(obj_s);
+        assert!(v == 2, 1001);
     }
 
-    public entry fun move_cup_to_global<T:store>(ctx: &mut StorageContext, sender: signer, object_id: ObjectID) {
-        let object_storage = storage_context::object_storage_mut(ctx);
-        let obj = object_storage::remove<Cup<S>>(object_storage, object_id);
-        debug::print(&obj);
-        let (_id,_owner,value) = object::unpack(obj);
-        account_storage::global_move_to(ctx, &sender, value);
-    }
 }
 
-// Mint S to A.
+// Mint
+//# run test::m::mint --signers A
 
-//# run test::m::mint_s --signers A
+//# view_object --object-id 0x8f684aa792b9b1058aeccd3941849e9662132d81c974b826a9c6bddae8880bd6
 
-//# view_object --object-id 0xae43e34e51db9c833ab50dd9aa8b27106519e5bbfd533737306e7b69ef253647
+//Update
+//# run test::m::update --signers A --args object:0x8f684aa792b9b1058aeccd3941849e9662132d81c974b826a9c6bddae8880bd6
 
-// Mint Cup<S> to A.
+//# view_object --object-id 0x8f684aa792b9b1058aeccd3941849e9662132d81c974b826a9c6bddae8880bd6
 
-//# run test::m::mint_cup --type-args test::m::S --signers A
+//Remove
+//# run test::m::remove --signers A --args object_id:0x8f684aa792b9b1058aeccd3941849e9662132d81c974b826a9c6bddae8880bd6
 
-//# view_object --object-id 0x0bbaf311ae6768a532b1f9dee65b1758a7bb1114fd57df8fa94cb2d1cb5f6896
-
-// Move S to global.
-//Currently, we use @address to pass object argument to the transaction, define a new way to pass object argument to the transaction.
-
-//# run test::m::move_s_to_global --signers A --args @0xae43e34e51db9c833ab50dd9aa8b27106519e5bbfd533737306e7b69ef253647
-
-//# view --address A --resource test::m::S
-
-// Move Cup<S> to global.
-
-//# run test::m::move_cup_to_global --signers A  --type-args test::m::S --args @0x0bbaf311ae6768a532b1f9dee65b1758a7bb1114fd57df8fa94cb2d1cb5f6896
-
-//# view --address A --resource test::m::Cup<test::m::S>
+// Check if removed
+//# view_object --object-id 0x8f684aa792b9b1058aeccd3941849e9662132d81c974b826a9c6bddae8880bd6

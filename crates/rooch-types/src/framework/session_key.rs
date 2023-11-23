@@ -8,15 +8,12 @@ use move_core_types::value::MoveValue;
 use move_core_types::{account_address::AccountAddress, ident_str, identifier::IdentStr};
 use moveos_types::{
     module_binding::{ModuleBinding, MoveFunctionCaller},
-    move_option::MoveOption,
-    state::MoveState,
-    transaction::{FunctionCall, MoveAction},
-    tx_context::TxContext,
-};
-use moveos_types::{
-    move_string::MoveAsciiString,
+    move_std::ascii::MoveAsciiString,
+    move_std::option::MoveOption,
+    moveos_std::tx_context::TxContext,
     serde::Readable,
-    state::{MoveStructState, MoveStructType},
+    state::{MoveState, MoveStructState, MoveStructType},
+    transaction::{FunctionCall, MoveAction},
 };
 use serde::{Deserialize, Serialize};
 use serde_with::hex::Hex;
@@ -52,8 +49,8 @@ impl MoveStructState for SessionScope {
     fn struct_layout() -> move_core_types::value::MoveStructLayout {
         move_core_types::value::MoveStructLayout::new(vec![
             move_core_types::value::MoveTypeLayout::Address,
-            <MoveAsciiString as MoveStructState>::type_layout(),
-            <MoveAsciiString as MoveStructState>::type_layout(),
+            MoveAsciiString::type_layout(),
+            MoveAsciiString::type_layout(),
         ])
     }
 }
@@ -95,7 +92,7 @@ pub struct SessionKey {
     pub authentication_key: Vec<u8>,
     #[serde_as(as = "Vec<Readable<DisplayFromStr, _>>")]
     pub scopes: Vec<SessionScope>,
-    pub expiration_time: u64,
+    pub create_time: u64,
     pub last_active_time: u64,
     pub max_inactive_interval: u64,
 }
@@ -112,9 +109,7 @@ impl MoveStructState for SessionKey {
             move_core_types::value::MoveTypeLayout::Vector(Box::new(
                 move_core_types::value::MoveTypeLayout::U8,
             )),
-            move_core_types::value::MoveTypeLayout::Vector(Box::new(
-                <SessionScope as MoveStructState>::type_layout(),
-            )),
+            move_core_types::value::MoveTypeLayout::Vector(Box::new(SessionScope::type_layout())),
             move_core_types::value::MoveTypeLayout::U64,
             move_core_types::value::MoveTypeLayout::U64,
             move_core_types::value::MoveTypeLayout::U64,
@@ -166,7 +161,6 @@ impl<'a> SessionKeyModule<'a> {
     pub fn create_session_key_action(
         authentication_key: Vec<u8>,
         scope: SessionScope,
-        expiration_time: u64,
         max_inactive_interval: u64,
     ) -> MoveAction {
         Self::create_move_action(
@@ -177,7 +171,6 @@ impl<'a> SessionKeyModule<'a> {
                 scope.module_address.to_move_value(),
                 scope.module_name.to_move_value(),
                 scope.function_name.to_move_value(),
-                MoveValue::U64(expiration_time),
                 MoveValue::U64(max_inactive_interval),
             ],
         )

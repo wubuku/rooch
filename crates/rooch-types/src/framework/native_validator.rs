@@ -1,23 +1,24 @@
 // Copyright (c) RoochNetwork
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{addresses::ROOCH_FRAMEWORK_ADDRESS, crypto::BuiltinScheme};
+use super::auth_validator::BuiltinAuthValidator;
+use crate::addresses::ROOCH_FRAMEWORK_ADDRESS;
 use anyhow::Result;
 use move_core_types::{
     account_address::AccountAddress, ident_str, identifier::IdentStr, value::MoveValue,
 };
 use moveos_types::{
     module_binding::{ModuleBinding, MoveFunctionCaller},
+    moveos_std::tx_context::TxContext,
     state::MoveStructType,
     transaction::{FunctionCall, MoveAction},
-    tx_context::TxContext,
 };
 
 pub struct NativeValidator {}
 
 impl NativeValidator {
-    pub fn scheme() -> BuiltinScheme {
-        BuiltinScheme::Ed25519
+    pub fn auth_validator_id() -> u64 {
+        BuiltinAuthValidator::Rooch.flag().into()
     }
 }
 
@@ -54,18 +55,18 @@ impl<'a> NativeValidatorModule<'a> {
         Ok(())
     }
 
-    pub fn rotate_authentication_key_action<V: MoveStructType>(public_key: Vec<u8>) -> MoveAction {
+    pub fn rotate_authentication_key_action(public_key: Vec<u8>) -> MoveAction {
         Self::create_move_action(
             Self::ROTATE_AUTHENTICATION_KEY_ENTRY_FUNCTION_NAME,
-            vec![V::type_tag()],
+            vec![],
             vec![MoveValue::vector_u8(public_key)],
         )
     }
 
-    pub fn remove_authentication_key_action<V: MoveStructType>() -> MoveAction {
+    pub fn remove_authentication_key_action() -> MoveAction {
         Self::create_move_action(
             Self::REMOVE_AUTHENTICATION_KEY_ENTRY_FUNCTION_NAME,
-            vec![V::type_tag()],
+            vec![],
             vec![],
         )
     }

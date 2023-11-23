@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use crate::vm::moveos_vm::MoveOSVM;
 use move_vm_runtime::config::VMConfig;
 
+use crate::gas::table::{initial_cost_schedule, MoveOSGasMeter};
 use move_binary_format::{
     errors::VMResult,
     file_format::{
@@ -27,15 +28,14 @@ use move_core_types::{
     value::{serialize_values, MoveValue},
     vm_status::{StatusCode, StatusType},
 };
-use move_vm_types::gas::UnmeteredGasMeter;
-use moveos_types::state_resolver::ListState;
+use moveos_types::state_resolver::StateKV;
 use moveos_types::{
     move_types::FunctionId,
-    object::ObjectID,
+    moveos_std::object::ObjectID,
+    moveos_std::tx_context::TxContext,
     state::State,
     state_resolver::StateResolver,
     transaction::{FunctionCall, MoveAction},
-    tx_context::TxContext,
 };
 
 // make a script with a given signature for main.
@@ -280,7 +280,7 @@ impl ResourceResolver for RemoteStore {
 }
 
 impl StateResolver for RemoteStore {
-    fn resolve_state(
+    fn resolve_table_item(
         &self,
         _handle: &ObjectID,
         _key: &[u8],
@@ -288,12 +288,12 @@ impl StateResolver for RemoteStore {
         Ok(None)
     }
 
-    fn resolve_list_state(
+    fn list_table_items(
         &self,
         _handle: &ObjectID,
         _cursor: Option<Vec<u8>>,
         _limit: usize,
-    ) -> anyhow::Result<Vec<Option<ListState>>, anyhow::Error> {
+    ) -> anyhow::Result<Vec<StateKV>, anyhow::Error> {
         todo!()
     }
 }
@@ -317,9 +317,11 @@ fn call_script_with_args_ty_args_signers(
 ) -> VMResult<()> {
     let moveos_vm = MoveOSVM::new(vec![], VMConfig::default()).unwrap();
     let remote_view = RemoteStore::new();
-    let gas_meter = UnmeteredGasMeter;
     let ctx = TxContext::random_for_testing_only();
-    let mut session = moveos_vm.new_session(&remote_view, ctx, vec![], vec![], gas_meter);
+    let cost_table = initial_cost_schedule();
+    let mut gas_meter = MoveOSGasMeter::new(cost_table, ctx.max_gas_amount);
+    gas_meter.set_metering(false);
+    let mut session = moveos_vm.new_session(&remote_view, ctx, gas_meter);
 
     let script_action = MoveAction::new_script_call(
         script,
@@ -345,10 +347,12 @@ fn call_script_function_with_args_ty_args_signers(
     let mut remote_view = RemoteStore::new();
     let id = module.self_id();
     remote_view.add_module(module);
-    let gas_meter = UnmeteredGasMeter;
     let ctx = TxContext::random_for_testing_only();
-    let mut session: crate::vm::moveos_vm::MoveOSSession<'_, '_, RemoteStore, UnmeteredGasMeter> =
-        moveos_vm.new_session(&remote_view, ctx, vec![], vec![], gas_meter);
+    let cost_table = initial_cost_schedule();
+    let mut gas_meter = MoveOSGasMeter::new(cost_table, ctx.max_gas_amount);
+    gas_meter.set_metering(false);
+    let mut session: crate::vm::moveos_vm::MoveOSSession<'_, '_, RemoteStore, MoveOSGasMeter> =
+        moveos_vm.new_session(&remote_view, ctx, gas_meter);
 
     let function_action = MoveAction::new_function_call(
         FunctionId::new(id, function_name),
@@ -589,7 +593,7 @@ type TestCases = Vec<(
 )>;
 
 fn general_cases() -> TestCases {
-    // In Moveos, the `StorageContext` will auto resolve singers,
+    // In Moveos, the `Context` will auto resolve singers,
     // so we don't need to pass a signer argument.
     vec![
         // too few signers (0)
@@ -828,9 +832,11 @@ fn call_missing_item() {
     // mising module
     let moveos_vm = MoveOSVM::new(vec![], VMConfig::default()).unwrap();
     let mut remote_view = RemoteStore::new();
-    let gas_meter = UnmeteredGasMeter;
     let ctx = TxContext::random_for_testing_only();
-    let mut session = moveos_vm.new_session(&remote_view, ctx.clone(), vec![], vec![], gas_meter);
+    let cost_table = initial_cost_schedule();
+    let mut gas_meter = MoveOSGasMeter::new(cost_table, ctx.max_gas_amount);
+    gas_meter.set_metering(false);
+    let mut session = moveos_vm.new_session(&remote_view, ctx.clone(), gas_meter);
     let func_call = FunctionCall::new(
         FunctionId::new(id.clone(), function_name.into()),
         vec![],
@@ -846,8 +852,10 @@ fn call_missing_item() {
 
     // missing function
     remote_view.add_module(module);
-    let gas_meter = UnmeteredGasMeter;
-    let mut session = moveos_vm.new_session(&remote_view, ctx, vec![], vec![], gas_meter);
+    let cost_table = initial_cost_schedule();
+    let mut gas_meter = MoveOSGasMeter::new(cost_table, ctx.max_gas_amount);
+    gas_meter.set_metering(false);
+    let mut session = moveos_vm.new_session(&remote_view, ctx, gas_meter);
     let error = session
         .execute_function_bypass_visibility(func_call)
         .err()

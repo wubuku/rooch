@@ -6,11 +6,11 @@ use codespan_reporting::diagnostic::Severity;
 use move_cli::base::test;
 use move_command_line_common::address::NumericalAddress;
 use move_command_line_common::parser::NumberFormat;
-use move_core_types::account_address::AccountAddress;
 use move_package::BuildConfig;
 use move_unit_test::extensions::set_extension_hook;
 use move_vm_runtime::native_extensions::NativeContextExtensions;
 use moveos_stdlib::natives::moveos_stdlib::{
+    event::NativeEventContext,
     move_module::NativeModuleContext,
     raw_table::{NativeTableContext, TableData},
 };
@@ -24,6 +24,8 @@ use rooch_framework::natives::{all_natives, GasParameters};
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 use termcolor::Buffer;
 
+use crate::cli_types::WalletContextOptions;
+
 #[derive(Parser)]
 pub struct Test {
     #[clap(flatten)]
@@ -36,17 +38,23 @@ pub struct Test {
     /// Note: This will fail if there are duplicates in the Move.toml file remove those first.
     #[clap(long, parse(try_from_str = crate::utils::parse_map), default_value = "")]
     pub(crate) named_addresses: BTreeMap<String, String>,
+
+    #[clap(flatten)]
+    config_options: WalletContextOptions,
 }
 
 impl Test {
-    pub fn execute(self, path: Option<PathBuf>, build_config: BuildConfig) -> anyhow::Result<()> {
+    pub async fn execute(
+        self,
+        path: Option<PathBuf>,
+        build_config: BuildConfig,
+    ) -> anyhow::Result<()> {
+        let context = self.config_options.build()?;
+
         let mut build_config = build_config;
-        build_config.additional_named_addresses = self
-            .named_addresses
-            .clone()
-            .into_iter()
-            .map(|(key, value)| (key, AccountAddress::from_hex_literal(&value).unwrap()))
-            .collect();
+        build_config
+            .additional_named_addresses
+            .extend(context.parse_and_resolve_addresses(self.named_addresses)?);
 
         let root_path = path.clone().unwrap_or_else(|| PathBuf::from("."));
 
@@ -102,7 +110,8 @@ fn new_moveos_natives_runtime(ext: &mut NativeContextExtensions) {
     let table_data = Arc::new(RwLock::new(TableData::default()));
     let table_ext = NativeTableContext::new(statedb, table_data);
     let module_ext = NativeModuleContext::new(statedb);
-
+    let event_ext = NativeEventContext::default();
     ext.add(table_ext);
     ext.add(module_ext);
+    ext.add(event_ext);
 }

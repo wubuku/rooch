@@ -1,15 +1,21 @@
-/// Source from https://github.com/aptos-labs/aptos-core/blob/c76c6b0fc3a1b8e21b6ba2f77151ca20ea31ca32/aptos-move/framework/aptos-stdlib/sources/type_info.move#L1
-/// https://github.com/starcoinorg/starcoin-framework/blob/952c51116e0ef5a97c119205d6f7e038acdd8682/sources/Token.move#L508
+// Copyright (c) RoochNetwork
+// SPDX-License-Identifier: Apache-2.0
+
+// Source from https://github.com/aptos-labs/aptos-core/blob/c76c6b0fc3a1b8e21b6ba2f77151ca20ea31ca32/aptos-move/framework/aptos-stdlib/sources/type_info.move#L1
+// https://github.com/starcoinorg/starcoin-framework/blob/952c51116e0ef5a97c119205d6f7e038acdd8682/sources/Token.move#L508
+
 module moveos_std::type_info {
-    use moveos_std::bcs;
+    
     use std::string;
     use std::vector;
+    
+    use moveos_std::bcs;
 
     //
     // Error codes
     //
 
-    const E_NATIVE_FUN_NOT_AVAILABLE: u64 = 1;
+    const ErrorNativeFunctionNotAvailable: u64 = 1;
 
     //
     // Structs
@@ -139,9 +145,9 @@ module moveos_std::type_info {
             assert struct_name == type_of<T>().struct_name;
         };
     }
-    spec verify_type_of_generic {
-        aborts_if !spec_is_struct<T>();
-    }
+    //spec verify_type_of_generic {
+    //    aborts_if !spec_is_struct<T>();
+    //}
 
     #[test_only]
     struct CustomType has drop {}

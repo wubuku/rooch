@@ -5,11 +5,13 @@
 
 Raw Key Value table. This is the basic of storage abstraction.
 This type table doesn't care about the key and value types. We leave the data type checking to the Native implementation.
-This type table if for design internal global storage, so all functions are friend.
+This type table is for internal global storage, so all functions are friend.
 
 
 -  [Resource `TableInfo`](#0x2_raw_table_TableInfo)
 -  [Resource `Box`](#0x2_raw_table_Box)
+-  [Struct `TableHandle`](#0x2_raw_table_TableHandle)
+-  [Constants](#@Constants_0)
 -  [Function `add`](#0x2_raw_table_add)
 -  [Function `borrow`](#0x2_raw_table_borrow)
 -  [Function `borrow_with_default`](#0x2_raw_table_borrow_with_default)
@@ -18,13 +20,14 @@ This type table if for design internal global storage, so all functions are frie
 -  [Function `upsert`](#0x2_raw_table_upsert)
 -  [Function `remove`](#0x2_raw_table_remove)
 -  [Function `contains`](#0x2_raw_table_contains)
+-  [Function `length`](#0x2_raw_table_length)
+-  [Function `is_empty`](#0x2_raw_table_is_empty)
+-  [Function `drop_unchecked`](#0x2_raw_table_drop_unchecked)
 -  [Function `destroy_empty`](#0x2_raw_table_destroy_empty)
 -  [Function `new_table_handle`](#0x2_raw_table_new_table_handle)
 
 
-<pre><code><b>use</b> <a href="object_id.md#0x2_object_id">0x2::object_id</a>;
-<b>use</b> <a href="tx_context.md#0x2_tx_context">0x2::tx_context</a>;
-</code></pre>
+<pre><code></code></pre>
 
 
 
@@ -39,22 +42,6 @@ This type table if for design internal global storage, so all functions are frie
 
 
 
-<details>
-<summary>Fields</summary>
-
-
-<dl>
-<dt>
-<code>state_root: <b>address</b></code>
-</dt>
-<dd>
-
-</dd>
-</dl>
-
-
-</details>
-
 <a name="0x2_raw_table_Box"></a>
 
 ## Resource `Box`
@@ -68,21 +55,64 @@ Because the GlobalValue in MoveVM must be a resource.
 
 
 
-<details>
-<summary>Fields</summary>
+<a name="0x2_raw_table_TableHandle"></a>
+
+## Struct `TableHandle`
+
+The TableHandle has the same layout as the ObjectID
+We can convert the ObjectID to TableHandle
+Define a TableHandle is for remove the dependency of ObjectID, and object module
 
 
-<dl>
-<dt>
-<code>val: V</code>
-</dt>
-<dd>
-
-</dd>
-</dl>
+<pre><code><b>struct</b> <a href="raw_table.md#0x2_raw_table_TableHandle">TableHandle</a> <b>has</b> <b>copy</b>, drop
+</code></pre>
 
 
-</details>
+
+<a name="@Constants_0"></a>
+
+## Constants
+
+
+<a name="0x2_raw_table_ErrorAlreadyExists"></a>
+
+The key already exists in the table
+
+
+<pre><code><b>const</b> <a href="raw_table.md#0x2_raw_table_ErrorAlreadyExists">ErrorAlreadyExists</a>: u64 = 1;
+</code></pre>
+
+
+
+<a name="0x2_raw_table_ErrorDuplicateOperation"></a>
+
+Duplicate operation on the table
+
+
+<pre><code><b>const</b> <a href="raw_table.md#0x2_raw_table_ErrorDuplicateOperation">ErrorDuplicateOperation</a>: u64 = 3;
+</code></pre>
+
+
+
+<a name="0x2_raw_table_ErrorNotEmpty"></a>
+
+The table is not empty
+
+
+<pre><code><b>const</b> <a href="raw_table.md#0x2_raw_table_ErrorNotEmpty">ErrorNotEmpty</a>: u64 = 4;
+</code></pre>
+
+
+
+<a name="0x2_raw_table_ErrorNotFound"></a>
+
+Can not found the key in the table
+
+
+<pre><code><b>const</b> <a href="raw_table.md#0x2_raw_table_ErrorNotFound">ErrorNotFound</a>: u64 = 2;
+</code></pre>
+
+
 
 <a name="0x2_raw_table_add"></a>
 
@@ -93,23 +123,10 @@ key already exists. The entry itself is not stored in the
 table, and cannot be discovered from it.
 
 
-<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_add">add</a>&lt;K: <b>copy</b>, drop, V&gt;(table_handle: &<a href="object_id.md#0x2_object_id_ObjectID">object_id::ObjectID</a>, key: K, val: V)
+<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_add">add</a>&lt;K: <b>copy</b>, drop, V&gt;(table_handle: <a href="raw_table.md#0x2_raw_table_TableHandle">raw_table::TableHandle</a>, key: K, val: V)
 </code></pre>
 
 
-
-<details>
-<summary>Implementation</summary>
-
-
-<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_add">add</a>&lt;K: <b>copy</b> + drop, V&gt;(table_handle: &ObjectID, key: K, val: V) {
-    <a href="raw_table.md#0x2_raw_table_add_box">add_box</a>&lt;K, V, <a href="raw_table.md#0x2_raw_table_Box">Box</a>&lt;V&gt;&gt;(table_handle, key, <a href="raw_table.md#0x2_raw_table_Box">Box</a> {val} )
-}
-</code></pre>
-
-
-
-</details>
 
 <a name="0x2_raw_table_borrow"></a>
 
@@ -119,23 +136,10 @@ Acquire an immutable reference to the value which <code>key</code> maps to.
 Aborts if there is no entry for <code>key</code>.
 
 
-<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_borrow">borrow</a>&lt;K: <b>copy</b>, drop, V&gt;(table_handle: &<a href="object_id.md#0x2_object_id_ObjectID">object_id::ObjectID</a>, key: K): &V
+<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_borrow">borrow</a>&lt;K: <b>copy</b>, drop, V&gt;(table_handle: <a href="raw_table.md#0x2_raw_table_TableHandle">raw_table::TableHandle</a>, key: K): &V
 </code></pre>
 
 
-
-<details>
-<summary>Implementation</summary>
-
-
-<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_borrow">borrow</a>&lt;K: <b>copy</b> + drop, V&gt;(table_handle: &ObjectID, key: K): &V {
-    &<a href="raw_table.md#0x2_raw_table_borrow_box">borrow_box</a>&lt;K, V, <a href="raw_table.md#0x2_raw_table_Box">Box</a>&lt;V&gt;&gt;(table_handle, key).val
-}
-</code></pre>
-
-
-
-</details>
 
 <a name="0x2_raw_table_borrow_with_default"></a>
 
@@ -145,27 +149,10 @@ Acquire an immutable reference to the value which <code>key</code> maps to.
 Returns specified default value if there is no entry for <code>key</code>.
 
 
-<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_borrow_with_default">borrow_with_default</a>&lt;K: <b>copy</b>, drop, V&gt;(table_handle: &<a href="object_id.md#0x2_object_id_ObjectID">object_id::ObjectID</a>, key: K, default: &V): &V
+<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_borrow_with_default">borrow_with_default</a>&lt;K: <b>copy</b>, drop, V&gt;(table_handle: <a href="raw_table.md#0x2_raw_table_TableHandle">raw_table::TableHandle</a>, key: K, default: &V): &V
 </code></pre>
 
 
-
-<details>
-<summary>Implementation</summary>
-
-
-<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_borrow_with_default">borrow_with_default</a>&lt;K: <b>copy</b> + drop, V&gt;(table_handle: &ObjectID, key: K, default: &V): &V {
-    <b>if</b> (!<a href="raw_table.md#0x2_raw_table_contains">contains</a>&lt;K&gt;(table_handle, <b>copy</b> key)) {
-        default
-    } <b>else</b> {
-        <a href="raw_table.md#0x2_raw_table_borrow">borrow</a>(table_handle, <b>copy</b> key)
-    }
-}
-</code></pre>
-
-
-
-</details>
 
 <a name="0x2_raw_table_borrow_mut"></a>
 
@@ -175,23 +162,10 @@ Acquire a mutable reference to the value which <code>key</code> maps to.
 Aborts if there is no entry for <code>key</code>.
 
 
-<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_borrow_mut">borrow_mut</a>&lt;K: <b>copy</b>, drop, V&gt;(table_handle: &<a href="object_id.md#0x2_object_id_ObjectID">object_id::ObjectID</a>, key: K): &<b>mut</b> V
+<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_borrow_mut">borrow_mut</a>&lt;K: <b>copy</b>, drop, V&gt;(table_handle: <a href="raw_table.md#0x2_raw_table_TableHandle">raw_table::TableHandle</a>, key: K): &<b>mut</b> V
 </code></pre>
 
 
-
-<details>
-<summary>Implementation</summary>
-
-
-<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_borrow_mut">borrow_mut</a>&lt;K: <b>copy</b> + drop, V&gt;(table_handle: &ObjectID, key: K): &<b>mut</b> V {
-    &<b>mut</b> <a href="raw_table.md#0x2_raw_table_borrow_box_mut">borrow_box_mut</a>&lt;K, V, <a href="raw_table.md#0x2_raw_table_Box">Box</a>&lt;V&gt;&gt;(table_handle, key).val
-}
-</code></pre>
-
-
-
-</details>
 
 <a name="0x2_raw_table_borrow_mut_with_default"></a>
 
@@ -201,26 +175,10 @@ Acquire a mutable reference to the value which <code>key</code> maps to.
 Insert the pair (<code>key</code>, <code>default</code>) first if there is no entry for <code>key</code>.
 
 
-<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_borrow_mut_with_default">borrow_mut_with_default</a>&lt;K: <b>copy</b>, drop, V: drop&gt;(table_handle: &<a href="object_id.md#0x2_object_id_ObjectID">object_id::ObjectID</a>, key: K, default: V): &<b>mut</b> V
+<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_borrow_mut_with_default">borrow_mut_with_default</a>&lt;K: <b>copy</b>, drop, V: drop&gt;(table_handle: <a href="raw_table.md#0x2_raw_table_TableHandle">raw_table::TableHandle</a>, key: K, default: V): &<b>mut</b> V
 </code></pre>
 
 
-
-<details>
-<summary>Implementation</summary>
-
-
-<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_borrow_mut_with_default">borrow_mut_with_default</a>&lt;K: <b>copy</b> + drop, V: drop&gt;(table_handle: &ObjectID, key: K, default: V): &<b>mut</b> V {
-    <b>if</b> (!<a href="raw_table.md#0x2_raw_table_contains">contains</a>&lt;K&gt;(table_handle, <b>copy</b> key)) {
-        <a href="raw_table.md#0x2_raw_table_add">add</a>(table_handle, <b>copy</b> key, default)
-    };
-    <a href="raw_table.md#0x2_raw_table_borrow_mut">borrow_mut</a>(table_handle, key)
-}
-</code></pre>
-
-
-
-</details>
 
 <a name="0x2_raw_table_upsert"></a>
 
@@ -230,28 +188,10 @@ Insert the pair (<code>key</code>, <code>value</code>) if there is no entry for 
 update the value of the entry for <code>key</code> to <code>value</code> otherwise
 
 
-<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_upsert">upsert</a>&lt;K: <b>copy</b>, drop, V: drop&gt;(table_handle: &<a href="object_id.md#0x2_object_id_ObjectID">object_id::ObjectID</a>, key: K, value: V)
+<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_upsert">upsert</a>&lt;K: <b>copy</b>, drop, V: drop&gt;(table_handle: <a href="raw_table.md#0x2_raw_table_TableHandle">raw_table::TableHandle</a>, key: K, value: V)
 </code></pre>
 
 
-
-<details>
-<summary>Implementation</summary>
-
-
-<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_upsert">upsert</a>&lt;K: <b>copy</b> + drop, V: drop&gt;(table_handle: &ObjectID, key: K, value: V) {
-    <b>if</b> (!<a href="raw_table.md#0x2_raw_table_contains">contains</a>&lt;K&gt;(table_handle, <b>copy</b> key)) {
-        <a href="raw_table.md#0x2_raw_table_add">add</a>(table_handle, <b>copy</b> key, value)
-    } <b>else</b> {
-        <b>let</b> ref = <a href="raw_table.md#0x2_raw_table_borrow_mut">borrow_mut</a>(table_handle, key);
-        *ref = value;
-    };
-}
-</code></pre>
-
-
-
-</details>
 
 <a name="0x2_raw_table_remove"></a>
 
@@ -261,24 +201,10 @@ Remove from <code><a href="table.md#0x2_table">table</a></code> and return the v
 Aborts if there is no entry for <code>key</code>.
 
 
-<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_remove">remove</a>&lt;K: <b>copy</b>, drop, V&gt;(table_handle: &<a href="object_id.md#0x2_object_id_ObjectID">object_id::ObjectID</a>, key: K): V
+<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_remove">remove</a>&lt;K: <b>copy</b>, drop, V&gt;(table_handle: <a href="raw_table.md#0x2_raw_table_TableHandle">raw_table::TableHandle</a>, key: K): V
 </code></pre>
 
 
-
-<details>
-<summary>Implementation</summary>
-
-
-<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_remove">remove</a>&lt;K: <b>copy</b> + drop, V&gt;(table_handle: &ObjectID, key: K): V {
-    <b>let</b> <a href="raw_table.md#0x2_raw_table_Box">Box</a> { val } = <a href="raw_table.md#0x2_raw_table_remove_box">remove_box</a>&lt;K, V, <a href="raw_table.md#0x2_raw_table_Box">Box</a>&lt;V&gt;&gt;(table_handle, key);
-    val
-}
-</code></pre>
-
-
-
-</details>
 
 <a name="0x2_raw_table_contains"></a>
 
@@ -287,48 +213,58 @@ Aborts if there is no entry for <code>key</code>.
 Returns true if <code><a href="table.md#0x2_table">table</a></code> contains an entry for <code>key</code>.
 
 
-<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_contains">contains</a>&lt;K: <b>copy</b>, drop&gt;(table_handle: &<a href="object_id.md#0x2_object_id_ObjectID">object_id::ObjectID</a>, key: K): bool
+<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_contains">contains</a>&lt;K: <b>copy</b>, drop&gt;(table_handle: <a href="raw_table.md#0x2_raw_table_TableHandle">raw_table::TableHandle</a>, key: K): bool
 </code></pre>
 
 
 
-<details>
-<summary>Implementation</summary>
+<a name="0x2_raw_table_length"></a>
+
+## Function `length`
+
+Returns the size of the table, the number of key-value pairs
 
 
-<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_contains">contains</a>&lt;K: <b>copy</b> + drop&gt;(table_handle: &ObjectID, key: K): bool {
-    <a href="raw_table.md#0x2_raw_table_contains_box">contains_box</a>&lt;K&gt;(table_handle, key)
-}
+<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_length">length</a>(table_handle: <a href="raw_table.md#0x2_raw_table_TableHandle">raw_table::TableHandle</a>): u64
 </code></pre>
 
 
 
-</details>
+<a name="0x2_raw_table_is_empty"></a>
+
+## Function `is_empty`
+
+Returns true if the table is empty (if <code>length</code> returns <code>0</code>)
+
+
+<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_is_empty">is_empty</a>(table_handle: <a href="raw_table.md#0x2_raw_table_TableHandle">raw_table::TableHandle</a>): bool
+</code></pre>
+
+
+
+<a name="0x2_raw_table_drop_unchecked"></a>
+
+## Function `drop_unchecked`
+
+Drop a table even if it is not empty.
+
+
+<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_drop_unchecked">drop_unchecked</a>(table_handle: <a href="raw_table.md#0x2_raw_table_TableHandle">raw_table::TableHandle</a>)
+</code></pre>
+
+
 
 <a name="0x2_raw_table_destroy_empty"></a>
 
 ## Function `destroy_empty`
 
-Destroy a table. The table must be empty to succeed.
+Destroy a table. Aborts if the table is not empty
 
 
-<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_destroy_empty">destroy_empty</a>(table_handle: &<a href="object_id.md#0x2_object_id_ObjectID">object_id::ObjectID</a>)
+<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_destroy_empty">destroy_empty</a>(table_handle: <a href="raw_table.md#0x2_raw_table_TableHandle">raw_table::TableHandle</a>)
 </code></pre>
 
 
-
-<details>
-<summary>Implementation</summary>
-
-
-<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_destroy_empty">destroy_empty</a>(table_handle: &ObjectID) {
-    <a href="raw_table.md#0x2_raw_table_destroy_empty_box">destroy_empty_box</a>(table_handle)
-}
-</code></pre>
-
-
-
-</details>
 
 <a name="0x2_raw_table_new_table_handle"></a>
 
@@ -336,20 +272,5 @@ Destroy a table. The table must be empty to succeed.
 
 
 
-<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_new_table_handle">new_table_handle</a>(ctx: &<b>mut</b> <a href="tx_context.md#0x2_tx_context_TxContext">tx_context::TxContext</a>): <a href="object_id.md#0x2_object_id_ObjectID">object_id::ObjectID</a>
+<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_new_table_handle">new_table_handle</a>(id: <b>address</b>): <a href="raw_table.md#0x2_raw_table_TableHandle">raw_table::TableHandle</a>
 </code></pre>
-
-
-
-<details>
-<summary>Implementation</summary>
-
-
-<pre><code><b>public</b>(<b>friend</b>) <b>fun</b> <a href="raw_table.md#0x2_raw_table_new_table_handle">new_table_handle</a>(ctx: &<b>mut</b> TxContext): ObjectID {
-    <a href="tx_context.md#0x2_tx_context_fresh_object_id">tx_context::fresh_object_id</a>(ctx)
-}
-</code></pre>
-
-
-
-</details>

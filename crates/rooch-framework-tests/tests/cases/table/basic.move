@@ -4,20 +4,17 @@
 module test::m {
     use std::string::String;
     use moveos_std::table::{Self, Table};
-    use moveos_std::tx_context;
-    use moveos_std::storage_context::{Self, StorageContext};
+    use moveos_std::context::{Self, Context};
+    use moveos_std::object::ObjectID;
     use moveos_std::object;
-    use moveos_std::object_storage;
-    use moveos_std::object_id::{ObjectID};
 
     struct KVStore has store, key {
         table: Table<String,vector<u8>>,
     }
 
-    public fun make_kv_store(ctx: &mut StorageContext): KVStore {
-        let tx_ctx = storage_context::tx_context_mut(ctx);
+    public fun make_kv_store(ctx: &mut Context): KVStore {
         KVStore{
-            table: table::new(tx_ctx),
+            table: context::new_table(ctx),
         }
     }
 
@@ -33,30 +30,21 @@ module test::m {
         table::borrow(&store.table, key)
     }
 
-    public fun save_to_object_storage(ctx: &mut StorageContext, kv: KVStore) : ObjectID {
-        let tx_ctx = storage_context::tx_context_mut(ctx);
-        let sender = tx_context::sender(tx_ctx);
-        let object = object::new(tx_ctx, sender, kv);
+    public fun save_to_object_storage(ctx: &mut Context, kv: KVStore) : ObjectID {
+        let object = context::new_object(ctx, kv);
         let object_id = object::id(&object);
-        let object_storage = storage_context::object_storage_mut(ctx);
-        object_storage::add(object_storage, object);
+        object::to_shared(object);
         object_id
-    }
-
-    public fun borrow_from_object_storage(ctx: &mut StorageContext, object_id: ObjectID): &KVStore {
-        let object_storage = storage_context::object_storage(ctx);
-        let object = object_storage::borrow(object_storage, object_id);
-        object::borrow<KVStore>(object)
     }
 }
 
 //# run --signers test
 script {
     use std::string;
-    use moveos_std::storage_context::{StorageContext};
+    use moveos_std::context::{Context};
     use test::m;
 
-    fun main(ctx: &mut StorageContext) {
+    fun main(ctx: &mut Context) {
         let kv = m::make_kv_store(ctx);
         m::add(&mut kv, string::utf8(b"test"), b"value");
         let object_id = m::save_to_object_storage(ctx, kv);
@@ -64,15 +52,14 @@ script {
     }
 }
 
-//# run --signers test --args @0xc1c9be4d48a51830d3af349c14cbd3c4614fdc9e998e7ed9b14bd34ea483bdf9
+//# run --signers test --args @0x1a2c876ea44c751aedab69ef139181114c79abf4fb8bca363b66969218e7d815
 script {
     use std::string;
-    use moveos_std::storage_context::{StorageContext};
-    use moveos_std::object_id::{ObjectID};
-    use test::m;
+    use moveos_std::object::{Self, Object};
+    use test::m::{Self, KVStore};
 
-    fun main(ctx: &mut StorageContext, object_id: ObjectID) {
-        let kv = m::borrow_from_object_storage(ctx, object_id);
+    fun main(kv_object: &Object<KVStore>) {
+        let kv = object::borrow(kv_object);
         assert!(m::contains(kv, string::utf8(b"test")), 1000);
         let v = m::borrow(kv, string::utf8(b"test"));
         assert!(v == &b"value", 1001);

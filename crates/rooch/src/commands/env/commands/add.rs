@@ -22,7 +22,7 @@ pub struct AddCommand {
 
 impl AddCommand {
     pub async fn execute(self) -> RoochResult<()> {
-        let mut context = self.context_options.build().await?;
+        let mut context = self.context_options.build()?;
         let AddCommand { alias, rpc, ws, .. } = self;
         let env = Env {
             ws,
@@ -32,8 +32,8 @@ impl AddCommand {
 
         // TODO: is this request timeout okay?
         env.create_rpc_client(Duration::from_secs(5), None).await?;
-        context.config.add_env(env);
-        context.config.save()?;
+        context.client_config.add_env(env);
+        context.client_config.save()?;
 
         println!("Environment `{} was successfully added", alias);
 

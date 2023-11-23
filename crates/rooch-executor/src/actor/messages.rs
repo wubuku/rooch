@@ -6,17 +6,16 @@ use coerce::actor::message::Message;
 use move_core_types::account_address::AccountAddress;
 use move_core_types::language_storage::StructTag;
 use moveos_types::access_path::AccessPath;
-use moveos_types::event::AnnotatedMoveOSEvent;
-use moveos_types::event_filter::EventFilter;
 use moveos_types::function_return_value::AnnotatedFunctionResult;
 use moveos_types::h256::H256;
+use moveos_types::moveos_std::event::{AnnotatedEvent, Event, EventID};
 use moveos_types::state::{AnnotatedState, State};
 use moveos_types::transaction::FunctionCall;
 use moveos_types::transaction::TransactionExecutionInfo;
 use moveos_types::transaction::TransactionOutput;
 use moveos_types::transaction::VerifiedMoveOSTransaction;
 use rooch_types::address::MultiChainAddress;
-use rooch_types::transaction::{AbstractTransaction, TransactionSequenceMapping};
+use rooch_types::transaction::AbstractTransaction;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
@@ -90,7 +89,7 @@ pub struct ListStatesMessage {
 }
 
 impl Message for ListStatesMessage {
-    type Result = Result<Vec<Option<(Vec<u8>, State)>>>;
+    type Result = Result<Vec<(Vec<u8>, State)>>;
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -101,7 +100,18 @@ pub struct ListAnnotatedStatesMessage {
 }
 
 impl Message for ListAnnotatedStatesMessage {
-    type Result = Result<Vec<Option<(Vec<u8>, AnnotatedState)>>>;
+    type Result = Result<Vec<(Vec<u8>, AnnotatedState)>>;
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GetAnnotatedEventsByEventHandleMessage {
+    pub event_handle_type: StructTag,
+    pub cursor: Option<u64>,
+    pub limit: u64,
+}
+
+impl Message for GetAnnotatedEventsByEventHandleMessage {
+    type Result = Result<Vec<AnnotatedEvent>>;
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -112,33 +122,23 @@ pub struct GetEventsByEventHandleMessage {
 }
 
 impl Message for GetEventsByEventHandleMessage {
-    type Result = Result<Vec<Option<AnnotatedMoveOSEvent>>>;
+    type Result = Result<Vec<Event>>;
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct GetEventsMessage {
-    pub filter: EventFilter,
+pub struct GetEventsByEventIDsMessage {
+    pub event_ids: Vec<EventID>,
 }
 
-impl Message for GetEventsMessage {
-    type Result = Result<Vec<Option<AnnotatedMoveOSEvent>>>;
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GetTxSeqMappingByTxOrderMessage {
-    pub cursor: Option<u128>,
-    pub limit: u64,
-}
-
-impl Message for GetTxSeqMappingByTxOrderMessage {
-    type Result = Result<Vec<TransactionSequenceMapping>>;
+impl Message for GetEventsByEventIDsMessage {
+    type Result = Result<Vec<Option<AnnotatedEvent>>>;
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct GetTransactionInfosByTxHashMessage {
+pub struct GetTxExecutionInfosByHashMessage {
     pub tx_hashes: Vec<H256>,
 }
 
-impl Message for GetTransactionInfosByTxHashMessage {
+impl Message for GetTxExecutionInfosByHashMessage {
     type Result = Result<Vec<Option<TransactionExecutionInfo>>>;
 }

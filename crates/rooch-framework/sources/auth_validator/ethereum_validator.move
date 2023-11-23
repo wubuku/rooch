@@ -1,37 +1,40 @@
-/// This module implements Ethereum validator with the ECDSA recoverable signature over Secp256k1 crypto scheme.
+// Copyright (c) RoochNetwork
+// SPDX-License-Identifier: Apache-2.0
+
+/// This module implements Ethereum validator with the ECDSA recoverable signature over Secp256k1.
 module rooch_framework::ethereum_validator {
 
     use std::error;
     use std::vector;
     use std::option::{Self, Option};
     use std::signer;
-    use moveos_std::storage_context::{Self, StorageContext};
+    use moveos_std::context::{Self, Context};
     use rooch_framework::account_authentication;
     use rooch_framework::ecdsa_k1_recoverable;
     use rooch_framework::auth_validator;
     use rooch_framework::ethereum_address::{Self, ETHAddress};
 
-    /// there defines scheme for each blockchain
-    const ETHEREUM_SCHEME: u64 = 3;
+    /// there defines auth validator id for each blockchain
+    const ETHEREUM_AUTH_VALIDATOR_ID: u64 = 1;
 
-    /// error code
-    const EInvalidPublicKeyLength: u64 = 0;
+    // error code
+    const ErrorInvalidPublicKeyLength: u64 = 1;
 
     struct EthereumValidator has store, drop {}
 
-    public fun scheme(): u64 {
-        ETHEREUM_SCHEME
+    public fun auth_validator_id(): u64 {
+        ETHEREUM_AUTH_VALIDATOR_ID
     }
 
-    public entry fun rotate_authentication_key_entry<T>(
-        ctx: &mut StorageContext,
+    public entry fun rotate_authentication_key_entry(
+        ctx: &mut Context,
         account: &signer,
         public_key: vector<u8>
     ) {
         // compare newly passed public key with Ethereum public key length to ensure it's compatible
         assert!(
             vector::length(&public_key) == ecdsa_k1_recoverable::public_key_length(),
-            error::invalid_argument(EInvalidPublicKeyLength)
+            error::invalid_argument(ErrorInvalidPublicKeyLength)
         );
 
         // User can rotate the authentication key arbitrarily, so we do not need to check the new public key with the account address.
@@ -40,17 +43,41 @@ module rooch_framework::ethereum_validator {
         rotate_authentication_key(ctx, account_addr, authentication_key);
     }
 
-    fun rotate_authentication_key(ctx: &mut StorageContext, account_addr: address, authentication_key: vector<u8>) {
+    fun rotate_authentication_key(ctx: &mut Context, account_addr: address, authentication_key: vector<u8>) {
         account_authentication::rotate_authentication_key<EthereumValidator>(ctx, account_addr, authentication_key);
     }
 
-    public entry fun remove_authentication_key_entry<T>(ctx: &mut StorageContext, account: &signer) {
+    public entry fun remove_authentication_key_entry(ctx: &mut Context, account: &signer) {
         account_authentication::remove_authentication_key<EthereumValidator>(ctx, signer::address_of(account));
+    }
+
+    public fun get_public_key_from_authenticator_payload(authenticator_payload: &vector<u8>): vector<u8> {
+        let public_key = vector::empty<u8>();
+        let i = ecdsa_k1_recoverable::signature_length();
+        let public_key_position = ecdsa_k1_recoverable::signature_length() + ecdsa_k1_recoverable::public_key_length();
+        while (i < public_key_position) {
+            let value = vector::borrow(authenticator_payload, i);
+            vector::push_back(&mut public_key, *value);
+            i = i + 1;
+        };
+        public_key
+    }
+
+    public fun get_signature_from_authenticator_payload(authenticator_payload: &vector<u8>): vector<u8> {
+        let sign = vector::empty<u8>();
+        let i = 0;
+        let signature_position = ecdsa_k1_recoverable::signature_length();
+        while (i < signature_position) {
+            let value = vector::borrow(authenticator_payload, i);
+            vector::push_back(&mut sign, *value);
+            i = i + 1;
+        };
+        sign
     }
 
     /// Get the authentication key of the given authenticator from authenticator_payload.
     public fun get_authentication_key_from_authenticator_payload(authenticator_payload: &vector<u8>): vector<u8> {
-        let public_key = ecdsa_k1_recoverable::get_public_key_from_authenticator_payload(authenticator_payload);
+        let public_key = get_public_key_from_authenticator_payload(authenticator_payload);
         let addr = public_key_to_address(public_key);
         ethereum_address::into_bytes(addr)
     }
@@ -66,17 +93,17 @@ module rooch_framework::ethereum_validator {
     }
 
     /// Get the authentication key option of the given account.
-    public fun get_authentication_key_option_from_account(ctx: &StorageContext, addr: address): Option<vector<u8>> {
+    public fun get_authentication_key_option_from_account(ctx: &Context, addr: address): Option<vector<u8>> {
         account_authentication::get_authentication_key<EthereumValidator>(ctx, addr)
     }
 
     /// The authentication key exists in account or not.
-    public fun is_authentication_key_in_account(ctx: &StorageContext, addr: address): bool {
+    public fun is_authentication_key_in_account(ctx: &Context, addr: address): bool {
         option::is_some(&get_authentication_key_option_from_account(ctx, addr))
     }
 
     /// Extract the authentication key of the authentication key option.
-    public fun get_authentication_key_from_account(ctx: &StorageContext, addr: address): vector<u8> {
+    public fun get_authentication_key_from_account(ctx: &Context, addr: address): vector<u8> {
         option::extract(&mut get_authentication_key_option_from_account(ctx, addr))
     }
 
@@ -84,7 +111,7 @@ module rooch_framework::ethereum_validator {
     public fun validate_signature(authenticator_payload: &vector<u8>, tx_hash: &vector<u8>) {
         assert!(
             ecdsa_k1_recoverable::verify(
-                &ecdsa_k1_recoverable::get_signature_from_authenticator_payload(authenticator_payload),
+                &get_signature_from_authenticator_payload(authenticator_payload),
                 tx_hash,
                 ecdsa_k1_recoverable::keccak256()
             ),
@@ -92,21 +119,21 @@ module rooch_framework::ethereum_validator {
         );
     }
 
-    public fun validate(ctx: &StorageContext, authenticator_payload: vector<u8>) {
-        let tx_hash = storage_context::tx_hash(ctx);
+    public fun validate(ctx: &Context, authenticator_payload: vector<u8>) {
+        let tx_hash = context::tx_hash(ctx);
         validate_signature(&authenticator_payload, &tx_hash);
 
         // TODO compare the auth_key from the payload with the auth_key from the account
     }
 
     fun pre_execute(
-        _ctx: &mut StorageContext,
+        _ctx: &mut Context,
     ) {}
 
     fun post_execute(
-        ctx: &mut StorageContext,
+        ctx: &mut Context,
     ) {
-        let account_addr = storage_context::sender(ctx);
+        let account_addr = context::sender(ctx);
         if (is_authentication_key_in_account(ctx, account_addr)) {
             let auth_key_in_account = get_authentication_key_from_account(ctx, account_addr);
             std::debug::print(&auth_key_in_account);

@@ -1,8 +1,10 @@
 // Copyright (c) RoochNetwork
 // SPDX-License-Identifier: Apache-2.0
 
+use super::BytesView;
 use super::{ModuleIdView, StateChangeSetView, StrView};
-use crate::jsonrpc_types::{EventView, H256View};
+use crate::jsonrpc_types::event_view::EventView;
+use crate::jsonrpc_types::H256View;
 use move_core_types::vm_status::{AbortLocation, KeptVMStatus};
 use moveos_types::transaction::TransactionExecutionInfo;
 use moveos_types::transaction::TransactionOutput;
@@ -80,21 +82,21 @@ impl From<KeptVMStatus> for KeptVMStatusView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct AuthenticatorView {
-    pub scheme: StrView<u64>,
-    pub payload: StrView<Vec<u8>>,
+    pub auth_validator_id: StrView<u64>,
+    pub payload: BytesView,
 }
 
 impl From<Authenticator> for AuthenticatorView {
     fn from(authenticator: Authenticator) -> Self {
         Self {
-            scheme: StrView(authenticator.scheme),
+            auth_validator_id: StrView(authenticator.auth_validator_id),
             payload: StrView(authenticator.payload),
         }
     }
 }
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct TransactionSequenceInfoView {
-    pub tx_order: StrView<u128>,
+    pub tx_order: StrView<u64>,
     pub tx_order_signature: AuthenticatorView,
     pub tx_accumulator_root: H256View,
 }
@@ -138,7 +140,6 @@ pub struct TransactionOutputView {
     //TODO The changeset will be removed in the future
     //pub changeset: ChangeSetView,
     pub table_changeset: StateChangeSetView,
-    // pub events: Vec<Event>,
     pub events: Vec<EventView>,
     pub gas_used: u64,
 }
@@ -150,8 +151,8 @@ impl From<TransactionOutput> for TransactionOutputView {
             table_changeset: tx_output.state_changeset.into(),
             events: tx_output
                 .events
-                .iter()
-                .map(|event| event.clone().into())
+                .into_iter()
+                .map(|event| event.into())
                 .collect(),
             gas_used: tx_output.gas_used,
         }

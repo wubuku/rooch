@@ -14,11 +14,21 @@ const ROOCH_TEAM: Record<string, AuthorDetails> = {
     twitterUsername: "renryderauthor",
     avatar: "/images/people/ren.jpg",
   },
+  popcnt: {
+    name: "POPCNT",
+    twitterUsername: "evex_popcnt",
+    avatar: "/images/people/popcnt.jpeg",
+  },
   geometryolife: {
       name: "Joe Chen",
       twitterUsername: "joechendev",
       avatar: "/images/people/joe.jpg"
-    }
+    },
+  justin: {
+    name: "Justin Y.",
+    twitterUsername: "justinkn08",
+    avatar: "/images/people/justin.jpg"
+  }
 };
 
 export type Author = keyof typeof ROOCH_TEAM;

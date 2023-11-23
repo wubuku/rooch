@@ -24,9 +24,13 @@ use move_vm_types::{
     loaded_data::runtime_types::Type,
     natives::function::NativeResult,
     pop_arg,
-    values::{GlobalValue, Struct, StructRef, Value},
+    values::{GlobalValue, Struct, Value},
 };
-use moveos_types::{object::ObjectID, state::TableTypeInfo, state_resolver::StateResolver};
+use moveos_types::{
+    moveos_std::{object::ObjectID, raw_table::TableInfo},
+    state::TableTypeInfo,
+    state_resolver::StateResolver,
+};
 use parking_lot::RwLock;
 use smallvec::smallvec;
 use std::{
@@ -44,17 +48,11 @@ pub struct NativeTableContext<'a> {
     table_data: Arc<RwLock<TableData>>,
 }
 
-// See stdlib/Error.move
-const _ECATEGORY_INVALID_STATE: u8 = 0;
-const ECATEGORY_INVALID_ARGUMENT: u8 = 7;
-
-//25607
-const ALREADY_EXISTS: u64 = (100 << 8) + ECATEGORY_INVALID_ARGUMENT as u64;
-//25863
-const NOT_FOUND: u64 = (101 << 8) + ECATEGORY_INVALID_ARGUMENT as u64;
-// Move side raises this
-//26112
-const NOT_EMPTY: u64 = (102 << 8) + _ECATEGORY_INVALID_STATE as u64;
+/// Ensure the error codes in this file is consistent with the error code in raw_table.move
+const E_ALREADY_EXISTS: u64 = 1;
+const E_NOT_FOUND: u64 = 2;
+const E_DUPLICATE_OPERATION: u64 = 3;
+const _E_NOT_EMPTY: u64 = 4; // This is not used, just used to keep consistent with raw_table.move
 
 // ===========================================================================================
 // Private Data Structures and Constants
@@ -185,6 +183,7 @@ pub struct Table {
     handle: ObjectID,
     key_layout: MoveTypeLayout,
     content: BTreeMap<Vec<u8>, TableRuntimeValue>,
+    size_increment: i64,
 }
 
 // =========================================================================================
@@ -217,6 +216,7 @@ impl TableData {
                     handle,
                     key_layout,
                     content: Default::default(),
+                    size_increment: 0,
                 };
                 if log::log_enabled!(log::Level::Trace) {
                     let key_type = type_to_type_tag(context, key_ty)?;
@@ -239,6 +239,7 @@ impl TableData {
                     handle,
                     key_layout,
                     content: Default::default(),
+                    size_increment: 0,
                 };
                 e.insert(table)
             }
@@ -284,7 +285,7 @@ impl Table {
             Entry::Vacant(entry) => {
                 let (tv, loaded) = match table_context
                     .resolver
-                    .resolve_state(&self.handle, entry.key())
+                    .resolve_table_item(&self.handle, entry.key())
                     .map_err(|err| {
                         partial_extension_error(format!("remote table resolver failure: {}", err))
                     })? {
@@ -317,30 +318,26 @@ impl Table {
     ) -> PartialVMResult<(&mut TableRuntimeValue, Option<Option<NumBytes>>)> {
         Ok(match self.content.entry(key) {
             Entry::Vacant(entry) => {
-                let (tv, loaded) =
-                    match resolver
-                        .resolve_state(&self.handle, entry.key())
-                        .map_err(|err| {
-                            partial_extension_error(format!(
-                                "remote table resolver failure: {}",
-                                err
-                            ))
-                        })? {
-                        Some(value_box) => {
-                            let value_layout = f(&value_box.value_type)?;
+                let (tv, loaded) = match resolver
+                    .resolve_table_item(&self.handle, entry.key())
+                    .map_err(|err| {
+                        partial_extension_error(format!("remote table resolver failure: {}", err))
+                    })? {
+                    Some(value_box) => {
+                        let value_layout = f(&value_box.value_type)?;
 
-                            let val = deserialize_and_box(&value_layout, &value_box.value)?;
-                            (
-                                TableRuntimeValue::new(
-                                    value_layout,
-                                    value_box.value_type,
-                                    GlobalValue::cached(val)?,
-                                ),
-                                Some(NumBytes::new(value_box.value.len() as u64)),
-                            )
-                        }
-                        None => (TableRuntimeValue::none(), None),
-                    };
+                        let val = deserialize_and_box(&value_layout, &value_box.value)?;
+                        (
+                            TableRuntimeValue::new(
+                                value_layout,
+                                value_box.value_type,
+                                GlobalValue::cached(val)?,
+                            ),
+                            Some(NumBytes::new(value_box.value.len() as u64)),
+                        )
+                    }
+                    None => (TableRuntimeValue::none(), None),
+                };
                 (entry.insert(tv), Some(loaded))
             }
             Entry::Occupied(entry) => (entry.into_mut(), None),
@@ -361,13 +358,15 @@ impl Table {
         ObjectID,
         MoveTypeLayout,
         BTreeMap<Vec<u8>, TableRuntimeValue>,
+        i64,
     ) {
         let Table {
             handle,
             key_layout,
             content,
+            size_increment,
         } = self;
-        (handle, key_layout, content)
+        (handle, key_layout, content, size_increment)
     }
 
     pub fn key_layout(&self) -> &MoveTypeLayout {
@@ -408,13 +407,13 @@ pub fn table_natives(table_addr: AccountAddress, gas_params: GasParameters) -> N
         ),
         (
             "raw_table",
-            "destroy_empty_box",
-            make_native_destroy_empty_box(gas_params.destroy_empty_box),
+            "drop_unchecked_box",
+            make_native_drop_unchecked_box(gas_params.drop_unchecked_box),
         ),
         (
             "raw_table",
-            "drop_unchecked_box",
-            make_native_drop_unchecked_box(gas_params.drop_unchecked_box),
+            "box_length",
+            make_native_box_length(gas_params.box_length),
         ),
     ];
 
@@ -463,7 +462,7 @@ fn native_add_box(
 
     let val = args.pop_back().unwrap();
     let key = args.pop_back().unwrap();
-    let handle = get_table_handle(pop_arg!(args, StructRef))?;
+    let handle = get_table_handle(&mut args)?;
 
     let mut cost = gas_params.base;
 
@@ -477,8 +476,14 @@ fn native_add_box(
     let value_layout = type_to_type_layout(context, &ty_args[1])?;
     let value_type = type_to_type_tag(context, &ty_args[1])?;
     match tv.move_to(val, value_layout, value_type) {
-        Ok(_) => Ok(NativeResult::ok(cost, smallvec![])),
-        Err(_) => Ok(NativeResult::err(cost, ALREADY_EXISTS)),
+        Ok(_) => {
+            table.size_increment += 1;
+            Ok(NativeResult::ok(cost, smallvec![]))
+        }
+        Err(_) => Ok(NativeResult::err(
+            cost,
+            moveos_types::move_std::error::already_exists(E_ALREADY_EXISTS),
+        )),
     }
 }
 
@@ -513,7 +518,7 @@ fn native_borrow_box(
     let mut table_data = table_context.table_data.write();
 
     let key = args.pop_back().unwrap();
-    let handle = get_table_handle(pop_arg!(args, StructRef))?;
+    let handle = get_table_handle(&mut args)?;
 
     let table = table_data.get_or_create_table(context, handle, &ty_args[0])?;
 
@@ -527,7 +532,10 @@ fn native_borrow_box(
     let value_type = type_to_type_tag(context, &ty_args[1])?;
     match tv.borrow_global(value_type) {
         Ok(ref_val) => Ok(NativeResult::ok(cost, smallvec![ref_val])),
-        Err(_) => Ok(NativeResult::err(cost, NOT_FOUND)),
+        Err(_) => Ok(NativeResult::err(
+            cost,
+            moveos_types::move_std::error::not_found(E_NOT_FOUND),
+        )),
     }
 }
 
@@ -562,7 +570,7 @@ fn native_contains_box(
     let mut table_data = table_context.table_data.write();
 
     let key = args.pop_back().unwrap();
-    let handle = get_table_handle(pop_arg!(args, StructRef))?;
+    let handle = get_table_handle(&mut args)?;
 
     let table = table_data.get_or_create_table(context, handle, &ty_args[0])?;
 
@@ -618,7 +626,7 @@ fn native_remove_box(
     let mut table_data = table_context.table_data.write();
 
     let key = args.pop_back().unwrap();
-    let handle = get_table_handle(pop_arg!(args, StructRef))?;
+    let handle = get_table_handle(&mut args)?;
 
     let table = table_data.get_or_create_table(context, handle, &ty_args[0])?;
 
@@ -630,8 +638,14 @@ fn native_remove_box(
     cost += common_gas_params.calculate_load_cost(loaded);
     let value_type = type_to_type_tag(context, &ty_args[1])?;
     match tv.move_from(value_type) {
-        Ok(val) => Ok(NativeResult::ok(cost, smallvec![val])),
-        Err(_) => Ok(NativeResult::err(cost, NOT_FOUND)),
+        Ok(val) => {
+            table.size_increment -= 1;
+            Ok(NativeResult::ok(cost, smallvec![val]))
+        }
+        Err(_) => Ok(NativeResult::err(
+            cost,
+            moveos_types::move_std::error::not_found(E_NOT_FOUND),
+        )),
     }
 }
 
@@ -647,12 +661,12 @@ pub fn make_native_remove_box(
 }
 
 #[derive(Debug, Clone)]
-pub struct DestroyEmptyBoxGasParameters {
+pub struct BoxLengthGasParameters {
     pub base: InternalGas,
 }
 
-fn native_destroy_empty_box(
-    gas_params: &DestroyEmptyBoxGasParameters,
+fn native_box_length(
+    gas_params: &BoxLengthGasParameters,
     context: &mut NativeContext,
     _ty_args: Vec<Type>,
     mut args: VecDeque<Value>,
@@ -660,23 +674,37 @@ fn native_destroy_empty_box(
     assert_eq!(args.len(), 1);
 
     let table_context = context.extensions().get::<NativeTableContext>();
-    let mut table_data = table_context.table_data.write();
+    let table_data = table_context.table_data.write();
 
-    let handle = get_table_handle(pop_arg!(args, StructRef))?;
-    if table_data.tables.contains_key(&handle)
-        && !table_data.tables.get(&handle).unwrap().content.is_empty()
-    {
-        return Ok(NativeResult::err(gas_params.base, NOT_EMPTY));
-    }
-    assert!(table_data.removed_tables.insert(handle));
+    let handle = get_table_handle(&mut args)?;
 
-    Ok(NativeResult::ok(gas_params.base, smallvec![]))
+    let remote_table_size = table_context
+        .resolver
+        .resolve_object_state(&handle)
+        .map_err(|err| partial_extension_error(format!("remote table resolver failure: {}", err)))?
+        .map(|state| state.as_object::<TableInfo>())
+        .transpose()
+        .map_err(|err| partial_extension_error(format!("remote table resolver failure: {}", err)))?
+        .map_or_else(|| 0u64, |obj| obj.value.size);
+
+    let size_increment = if table_data.exist_table(&handle) {
+        table_data.borrow_table(&handle).unwrap().size_increment
+    } else {
+        0i64
+    };
+    let updated_table_size = (remote_table_size as i64) + size_increment;
+    debug_assert!(updated_table_size >= 0);
+
+    let length = Value::u64(updated_table_size as u64);
+    let cost = gas_params.base;
+
+    Ok(NativeResult::ok(cost, smallvec![length]))
 }
 
-pub fn make_native_destroy_empty_box(gas_params: DestroyEmptyBoxGasParameters) -> NativeFunction {
+pub fn make_native_box_length(gas_params: BoxLengthGasParameters) -> NativeFunction {
     Arc::new(
         move |context, ty_args, args| -> PartialVMResult<NativeResult> {
-            native_destroy_empty_box(&gas_params, context, ty_args, args)
+            native_box_length(&gas_params, context, ty_args, args)
         },
     )
 }
@@ -688,13 +716,25 @@ pub struct DropUncheckedBoxGasParameters {
 
 fn native_drop_unchecked_box(
     gas_params: &DropUncheckedBoxGasParameters,
-    _context: &mut NativeContext,
+    context: &mut NativeContext,
     _ty_args: Vec<Type>,
-    args: VecDeque<Value>,
+    mut args: VecDeque<Value>,
 ) -> PartialVMResult<NativeResult> {
     assert_eq!(args.len(), 1);
-    //TODO remove the droped table from the table_data
-    Ok(NativeResult::ok(gas_params.base, smallvec![]))
+
+    let table_context = context.extensions().get::<NativeTableContext>();
+    let mut table_data = table_context.table_data.write();
+
+    let handle = get_table_handle(&mut args)?;
+
+    if table_data.removed_tables.insert(handle) {
+        Ok(NativeResult::ok(gas_params.base, smallvec![]))
+    } else {
+        Ok(NativeResult::err(
+            gas_params.base,
+            moveos_types::move_std::error::not_found(E_DUPLICATE_OPERATION),
+        ))
+    }
 }
 
 pub fn make_native_drop_unchecked_box(gas_params: DropUncheckedBoxGasParameters) -> NativeFunction {
@@ -712,8 +752,8 @@ pub struct GasParameters {
     pub borrow_box: BorrowBoxGasParameters,
     pub contains_box: ContainsBoxGasParameters,
     pub remove_box: RemoveGasParameters,
-    pub destroy_empty_box: DestroyEmptyBoxGasParameters,
     pub drop_unchecked_box: DropUncheckedBoxGasParameters,
+    pub box_length: BoxLengthGasParameters,
 }
 
 impl GasParameters {
@@ -740,8 +780,8 @@ impl GasParameters {
                 base: 0.into(),
                 per_byte_serialized: 0.into(),
             },
-            destroy_empty_box: DestroyEmptyBoxGasParameters { base: 0.into() },
             drop_unchecked_box: DropUncheckedBoxGasParameters { base: 0.into() },
+            box_length: BoxLengthGasParameters { base: 0.into() },
         }
     }
 }
@@ -750,8 +790,9 @@ impl GasParameters {
 // Helpers
 
 // The handle type in Move is `&ObjectID`. This function extracts the address from `ObjectID`.
-fn get_table_handle(table: StructRef) -> PartialVMResult<ObjectID> {
-    helpers::get_object_id(table)
+fn get_table_handle(args: &mut VecDeque<Value>) -> PartialVMResult<ObjectID> {
+    let handle = pop_arg!(args, Struct);
+    helpers::get_object_id_from_struct(handle)
 }
 
 pub fn serialize(layout: &MoveTypeLayout, val: &Value) -> PartialVMResult<Vec<u8>> {
@@ -759,8 +800,7 @@ pub fn serialize(layout: &MoveTypeLayout, val: &Value) -> PartialVMResult<Vec<u8
         partial_extension_error(format!(
             "cannot serialize table key or value, layout:{:?}, val:{:?}",
             layout, val
-        ));
-        panic!("debug")
+        ))
     })
 }
 

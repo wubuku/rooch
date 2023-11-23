@@ -25,22 +25,22 @@
 ## Constants
 
 
-<a name="0x2_address_EAddressParseError"></a>
+<a name="0x2_address_ErrorAddressParseError"></a>
 
 Error from <code>from_bytes</code> when it is supplied too many or too few bytes.
 
 
-<pre><code><b>const</b> <a href="address.md#0x2_address_EAddressParseError">EAddressParseError</a>: u64 = 0;
+<pre><code><b>const</b> <a href="address.md#0x2_address_ErrorAddressParseError">ErrorAddressParseError</a>: u64 = 1;
 </code></pre>
 
 
 
-<a name="0x2_address_EU256TooBigToConvertToAddress"></a>
+<a name="0x2_address_ErrorU256TooBigToConvertToAddress"></a>
 
 Error from <code>from_u256</code> when
 
 
-<pre><code><b>const</b> <a href="address.md#0x2_address_EU256TooBigToConvertToAddress">EU256TooBigToConvertToAddress</a>: u64 = 1;
+<pre><code><b>const</b> <a href="address.md#0x2_address_ErrorU256TooBigToConvertToAddress">ErrorU256TooBigToConvertToAddress</a>: u64 = 2;
 </code></pre>
 
 
@@ -73,26 +73,13 @@ Convert <code>a</code> into a u256 by interpreting <code>a</code> as the bytes o
 Convert <code>n</code> into an address by encoding it as a big-endian integer (e.g., <code>from_u256(1) = @0x1</code>)
 Aborts if <code>n</code> > <code>MAX_ADDRESS</code>
 Convert <code>bytes</code> into an address.
-Aborts with <code><a href="address.md#0x2_address_EAddressParseError">EAddressParseError</a></code> if the length of <code>bytes</code> is invalid length
+Aborts with <code><a href="address.md#0x2_address_ErrorAddressParseError">ErrorAddressParseError</a></code> if the length of <code>bytes</code> is invalid length
 
 
 <pre><code><b>public</b> <b>fun</b> <a href="address.md#0x2_address_from_bytes">from_bytes</a>(bytes: <a href="">vector</a>&lt;u8&gt;): <b>address</b>
 </code></pre>
 
 
-
-<details>
-<summary>Implementation</summary>
-
-
-<pre><code><b>public</b> <b>fun</b> <a href="address.md#0x2_address_from_bytes">from_bytes</a>(bytes: <a href="">vector</a>&lt;u8&gt;): <b>address</b>{
-    bcs::to_address(bytes)
-}
-</code></pre>
-
-
-
-</details>
 
 <a name="0x2_address_to_bytes"></a>
 
@@ -106,19 +93,6 @@ Convert <code>a</code> into BCS-encoded bytes.
 
 
 
-<details>
-<summary>Implementation</summary>
-
-
-<pre><code><b>public</b> <b>fun</b> <a href="address.md#0x2_address_to_bytes">to_bytes</a>(a: <b>address</b>): <a href="">vector</a>&lt;u8&gt; {
-    <a href="../doc/bcs.md#0x1_bcs_to_bytes">bcs::to_bytes</a>(&a)
-}
-</code></pre>
-
-
-
-</details>
-
 <a name="0x2_address_to_ascii_string"></a>
 
 ## Function `to_ascii_string`
@@ -131,44 +105,18 @@ Convert <code>a</code> to a hex-encoded ASCII string
 
 
 
-<details>
-<summary>Implementation</summary>
-
-
-<pre><code><b>public</b> <b>fun</b> <a href="address.md#0x2_address_to_ascii_string">to_ascii_string</a>(a: <b>address</b>): <a href="_String">ascii::String</a> {
-    <a href="_string">ascii::string</a>(<a href="hex.md#0x2_hex_encode">hex::encode</a>(<a href="address.md#0x2_address_to_bytes">to_bytes</a>(a)))
-}
-</code></pre>
-
-
-
-</details>
-
 <a name="0x2_address_length"></a>
 
 ## Function `length`
 
 Convert <code>a</code> to a hex-encoded ASCII string
-Length of a Sui address in bytes
+Length of a Rooch address in bytes
 
 
 <pre><code><b>public</b> <b>fun</b> <a href="address.md#0x2_address_length">length</a>(): u64
 </code></pre>
 
 
-
-<details>
-<summary>Implementation</summary>
-
-
-<pre><code><b>public</b> <b>fun</b> <a href="address.md#0x2_address_length">length</a>(): u64 {
-    <a href="address.md#0x2_address_LENGTH">LENGTH</a>
-}
-</code></pre>
-
-
-
-</details>
 
 <a name="0x2_address_max"></a>
 
@@ -179,18 +127,3 @@ Largest possible address
 
 <pre><code><b>public</b> <b>fun</b> <a href="address.md#0x2_address_max">max</a>(): u256
 </code></pre>
-
-
-
-<details>
-<summary>Implementation</summary>
-
-
-<pre><code><b>public</b> <b>fun</b> <a href="address.md#0x2_address_max">max</a>(): u256 {
-    <a href="address.md#0x2_address_MAX">MAX</a>
-}
-</code></pre>
-
-
-
-</details>

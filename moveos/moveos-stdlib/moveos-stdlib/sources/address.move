@@ -1,4 +1,10 @@
-//Source https://github.com/MystenLabs/sui/blob/598f106ef5fbdfbe1b644236f0caf46c94f4d1b7/crates/sui-framework/sources/address.move
+// Copyright (c) RoochNetwork
+// SPDX-License-Identifier: Apache-2.0
+
+// Copyright (c) Mysten Labs, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
+// Source https://github.com/MystenLabs/sui/blob/598f106ef5fbdfbe1b644236f0caf46c94f4d1b7/crates/sui-framework/sources/address.move
 
 module moveos_std::address {
     use std::ascii;
@@ -12,10 +18,10 @@ module moveos_std::address {
     const MAX: u256 = 115792089237316195423570985008687907853269984665640564039457584007913129639935;
 
     /// Error from `from_bytes` when it is supplied too many or too few bytes.
-    const EAddressParseError: u64 = 0;
+    const ErrorAddressParseError: u64 = 1;
 
     /// Error from `from_u256` when
-    const EU256TooBigToConvertToAddress: u64 = 1;
+    const ErrorU256TooBigToConvertToAddress: u64 = 2;
 
     //TODO
     /// Convert `a` into a u256 by interpreting `a` as the bytes of a big-endian integer
@@ -28,7 +34,7 @@ module moveos_std::address {
     //native public fun from_u256(n: u256): address;
 
     /// Convert `bytes` into an address.
-    /// Aborts with `EAddressParseError` if the length of `bytes` is invalid length
+    /// Aborts with `ErrorAddressParseError` if the length of `bytes` is invalid length
     public fun from_bytes(bytes: vector<u8>): address{
         bcs::to_address(bytes)
     }
@@ -50,7 +56,7 @@ module moveos_std::address {
     //     string::from_ascii(to_ascii_string(a))
     // }
 
-    /// Length of a Sui address in bytes
+    /// Length of a Rooch address in bytes
     public fun length(): u64 {
         LENGTH
     }

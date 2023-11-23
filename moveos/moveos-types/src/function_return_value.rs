@@ -61,6 +61,21 @@ impl From<VMResult<Vec<FunctionReturnValue>>> for FunctionResult {
     }
 }
 
+impl TryFrom<AnnotatedFunctionResult> for FunctionResult {
+    type Error = anyhow::Error;
+
+    fn try_from(value: AnnotatedFunctionResult) -> Result<Self, Self::Error> {
+        Ok(Self {
+            vm_status: value.vm_status,
+            return_values: value.return_values.map(|v| {
+                v.into_iter()
+                    .map(|v| v.value)
+                    .collect::<Vec<FunctionReturnValue>>()
+            }),
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct DecodedFunctionResult<V> {
     pub vm_status: VMStatus,
@@ -100,5 +115,5 @@ impl FunctionReturnValue {
 #[derive(Debug, Clone)]
 pub struct AnnotatedFunctionReturnValue {
     pub value: FunctionReturnValue,
-    pub move_value: AnnotatedMoveValue,
+    pub decoded_value: AnnotatedMoveValue,
 }

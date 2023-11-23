@@ -4,13 +4,14 @@
 use crate::cli_types::{TransactionOptions, WalletContextOptions};
 use clap::Parser;
 use moveos_types::module_binding::MoveFunctionCaller;
-use rooch_key::keystore::AccountKeystore;
+use rooch_key::key_derive::verify_password;
+use rooch_key::keystore::account_keystore::AccountKeystore;
 use rooch_types::{
     address::RoochAddress,
-    crypto::BuiltinScheme,
     error::{RoochError, RoochResult},
     framework::session_key::{SessionKey, SessionKeyModule, SessionScope},
 };
+use rpassword::prompt_password;
 
 /// Create a new session key on-chain
 #[derive(Debug, Parser)]
@@ -21,11 +22,8 @@ pub struct CreateCommand {
     #[clap(long)]
     pub scope: SessionScope,
 
-    /// The expiration time of the session key, in seconds.
-    #[clap(long, default_value = "3600")]
-    pub expiration_time: u64,
-
     /// The max inactive interval of the session key, in seconds.
+    /// If the max_inactive_interval is 0, the session key will never expire.
     #[clap(long, default_value = "3600")]
     pub max_inactive_interval: u64,
 
@@ -38,34 +36,57 @@ pub struct CreateCommand {
 
 impl CreateCommand {
     pub async fn execute(self) -> RoochResult<SessionKey> {
-        let mut context = self.context_options.build().await?;
+        let mut context = self.context_options.build()?;
 
-        if self.tx_options.sender_account.is_none() {
-            return Err(RoochError::CommandArgumentError(
-                "--sender-account required".to_owned(),
-            ));
-        }
-        let sender: RoochAddress = context
-            .parse_account_arg(self.tx_options.sender_account.unwrap())?
-            .into();
+        let sender: RoochAddress = context.resolve_address(self.tx_options.sender)?.into();
 
-        let session_auth_key = context.config.keystore.generate_session_key(&sender)?;
+        let session_auth_key = if context.keystore.get_if_password_is_empty() {
+            context.keystore.generate_session_key(&sender, None)?
+        } else {
+            let password =
+                prompt_password("Enter the password to create a new key pair:").unwrap_or_default();
+            let is_verified =
+                verify_password(Some(password.clone()), context.keystore.get_password_hash())?;
 
+            if !is_verified {
+                return Err(RoochError::InvalidPasswordError(
+                    "Password is invalid".to_owned(),
+                ));
+            }
+
+            context
+                .keystore
+                .generate_session_key(&sender, Some(password))?
+        };
         let session_scope = self.scope;
 
         let action =
             rooch_types::framework::session_key::SessionKeyModule::create_session_key_action(
                 session_auth_key.as_ref().to_vec(),
                 session_scope.clone(),
-                self.expiration_time,
                 self.max_inactive_interval,
             );
 
-        println!("Generated new session key {session_auth_key} for address  [{sender}]",);
+        println!("Generated new session key {session_auth_key} for address [{sender}]",);
 
-        let result = context
-            .sign_and_execute(sender, action, BuiltinScheme::Ed25519)
-            .await?;
+        let result = if context.keystore.get_if_password_is_empty() {
+            context.sign_and_execute(sender, action, None).await?
+        } else {
+            let password =
+                prompt_password("Enter the password to create a new key pair:").unwrap_or_default();
+            let is_verified =
+                verify_password(Some(password.clone()), context.keystore.get_password_hash())?;
+
+            if !is_verified {
+                return Err(RoochError::InvalidPasswordError(
+                    "Password is invalid".to_owned(),
+                ));
+            }
+
+            context
+                .sign_and_execute(sender, action, Some(password))
+                .await?
+        };
         context.assert_execute_success(result)?;
         let client = context.get_client().await?;
         let session_key_module = client.as_module_binding::<SessionKeyModule>();
@@ -77,6 +98,7 @@ impl CreateCommand {
                     session_auth_key
                 ))
             })?;
+
         Ok(session_key)
     }
 }

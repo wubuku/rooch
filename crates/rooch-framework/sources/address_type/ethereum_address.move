@@ -1,17 +1,22 @@
+// Copyright (c) RoochNetwork
+// SPDX-License-Identifier: Apache-2.0
+
 module rooch_framework::ethereum_address {
     use std::vector;
     use std::error;
     use rooch_framework::ecdsa_k1_recoverable;
     use rooch_framework::hash;
 
-    // Ethereum addresses are always 20 bytes
-    const VALID_ETHEREUM_ADDR_LENGTH: u64 = 20;
+    /// Ethereum addresses are always 20 bytes
+    const ETHEREUM_ADDR_LENGTH: u64 = 20;
 
-    /// error code
-    const EMalformedPublicKey: u64 = 0;
-    const EDecompressPublicKey: u64 = 1;
+    // error code
+    const ErrorMalformedPublicKey: u64 = 1;
+    const ErrorDecompressPublicKey: u64 = 2;
+    const ErrorInvaidAddressBytes: u64 = 3;
 
-    struct ETHAddress has store, drop {
+    #[data_struct]
+    struct ETHAddress has store,copy,drop {
         bytes: vector<u8>,
     }
 
@@ -19,13 +24,13 @@ module rooch_framework::ethereum_address {
         // A pubkey is a 33-bytes compressed public key
         assert!(
             vector::length(&pub_key) == ecdsa_k1_recoverable::public_key_length(),
-            error::invalid_argument(EMalformedPublicKey)
+            error::invalid_argument(ErrorMalformedPublicKey)
         );
         // Decompressing the pubkey to a 65-bytes public key.
         let uncompressed = ecdsa_k1_recoverable::decompress_pubkey(&pub_key);
         assert!(
             vector::length(&uncompressed) == ecdsa_k1_recoverable::uncompressed_public_key_length(),
-            error::internal(EDecompressPublicKey)
+            error::internal(ErrorDecompressPublicKey)
         );
         // Ignore the first byte and take the last 64-bytes of the uncompressed pubkey.
         let uncompressed_64 = vector::empty<u8>();
@@ -47,6 +52,16 @@ module rooch_framework::ethereum_address {
         // Return the 20 bytes address as the Ethereum address
         ETHAddress {
             bytes: address_bytes,
+        }
+    }
+
+    public fun from_bytes(bytes: vector<u8>): ETHAddress {
+        assert!(
+            vector::length(&bytes) == ETHEREUM_ADDR_LENGTH,
+            error::invalid_argument(ErrorInvaidAddressBytes)
+        );
+        ETHAddress {
+            bytes: bytes,
         }
     }
 

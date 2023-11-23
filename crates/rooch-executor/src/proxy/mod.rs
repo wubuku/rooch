@@ -2,33 +2,36 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::actor::messages::{
-    GetTransactionInfosByTxHashMessage, GetTxSeqMappingByTxOrderMessage,
+    GetEventsByEventHandleMessage, GetEventsByEventIDsMessage, GetTxExecutionInfosByHashMessage,
     ListAnnotatedStatesMessage, ListStatesMessage,
 };
 use crate::actor::{
     executor::ExecutorActor,
     messages::{
-        AnnotatedStatesMessage, ExecuteViewFunctionMessage, GetEventsByEventHandleMessage,
-        GetEventsMessage, ResolveMessage, StatesMessage, ValidateTransactionMessage,
+        AnnotatedStatesMessage, ExecuteViewFunctionMessage, GetAnnotatedEventsByEventHandleMessage,
+        ResolveMessage, StatesMessage, ValidateTransactionMessage,
     },
 };
 use anyhow::Result;
 use coerce::actor::ActorRef;
 use move_core_types::account_address::AccountAddress;
 use move_core_types::language_storage::StructTag;
-use moveos_types::function_return_value::AnnotatedFunctionResult;
+use moveos_types::function_return_value::{AnnotatedFunctionResult, FunctionResult};
 use moveos_types::h256::H256;
+use moveos_types::module_binding::MoveFunctionCaller;
+use moveos_types::moveos_std::event::{Event, EventID};
+use moveos_types::moveos_std::tx_context::TxContext;
 use moveos_types::transaction::FunctionCall;
 use moveos_types::transaction::TransactionExecutionInfo;
 use moveos_types::transaction::TransactionOutput;
 use moveos_types::{access_path::AccessPath, transaction::VerifiedMoveOSTransaction};
 use moveos_types::{
-    event::AnnotatedMoveOSEvent,
-    event_filter::EventFilter,
+    moveos_std::event::AnnotatedEvent,
     state::{AnnotatedState, State},
 };
 use rooch_types::address::MultiChainAddress;
-use rooch_types::transaction::{AbstractTransaction, TransactionSequenceMapping};
+use rooch_types::transaction::AbstractTransaction;
+use tokio::runtime::Handle;
 
 #[derive(Clone)]
 pub struct ExecutorProxy {
@@ -88,7 +91,7 @@ impl ExecutorProxy {
         access_path: AccessPath,
         cursor: Option<Vec<u8>>,
         limit: usize,
-    ) -> Result<Vec<Option<(Vec<u8>, State)>>> {
+    ) -> Result<Vec<(Vec<u8>, State)>> {
         self.actor
             .send(ListStatesMessage {
                 access_path,
@@ -103,10 +106,25 @@ impl ExecutorProxy {
         access_path: AccessPath,
         cursor: Option<Vec<u8>>,
         limit: usize,
-    ) -> Result<Vec<Option<(Vec<u8>, AnnotatedState)>>> {
+    ) -> Result<Vec<(Vec<u8>, AnnotatedState)>> {
         self.actor
             .send(ListAnnotatedStatesMessage {
                 access_path,
+                cursor,
+                limit,
+            })
+            .await?
+    }
+
+    pub async fn get_annotated_events_by_event_handle(
+        &self,
+        event_handle_type: StructTag,
+        cursor: Option<u64>,
+        limit: u64,
+    ) -> Result<Vec<AnnotatedEvent>> {
+        self.actor
+            .send(GetAnnotatedEventsByEventHandleMessage {
+                event_handle_type,
                 cursor,
                 limit,
             })
@@ -118,7 +136,7 @@ impl ExecutorProxy {
         event_handle_type: StructTag,
         cursor: Option<u64>,
         limit: u64,
-    ) -> Result<Vec<Option<AnnotatedMoveOSEvent>>> {
+    ) -> Result<Vec<Event>> {
         self.actor
             .send(GetEventsByEventHandleMessage {
                 event_handle_type,
@@ -128,29 +146,36 @@ impl ExecutorProxy {
             .await?
     }
 
-    pub async fn get_events(
+    pub async fn get_events_by_event_ids(
         &self,
-        filter: EventFilter,
-    ) -> Result<Vec<Option<AnnotatedMoveOSEvent>>> {
-        self.actor.send(GetEventsMessage { filter }).await?
-    }
-
-    pub async fn get_tx_seq_mapping_by_tx_order(
-        &self,
-        cursor: Option<u128>,
-        limit: u64,
-    ) -> Result<Vec<TransactionSequenceMapping>> {
+        event_ids: Vec<EventID>,
+    ) -> Result<Vec<Option<AnnotatedEvent>>> {
         self.actor
-            .send(GetTxSeqMappingByTxOrderMessage { cursor, limit })
+            .send(GetEventsByEventIDsMessage { event_ids })
             .await?
     }
 
-    pub async fn get_transaction_infos_by_tx_hash(
+    pub async fn get_transaction_execution_infos_by_hash(
         &self,
         tx_hashes: Vec<H256>,
     ) -> Result<Vec<Option<TransactionExecutionInfo>>> {
         self.actor
-            .send(GetTransactionInfosByTxHashMessage { tx_hashes })
+            .send(GetTxExecutionInfosByHashMessage { tx_hashes })
             .await?
+    }
+}
+
+impl MoveFunctionCaller for ExecutorProxy {
+    fn call_function(
+        &self,
+        _ctx: &TxContext,
+        function_call: FunctionCall,
+    ) -> Result<FunctionResult> {
+        let executor = self.clone();
+        let function_result = tokio::task::block_in_place(|| {
+            Handle::current()
+                .block_on(async move { executor.execute_view_function(function_call).await })
+        })?;
+        function_result.try_into()
     }
 }

@@ -18,6 +18,7 @@ anyhow = { workspace = true }
 bcs = { workspace = true }
 bech32 = { workspace = true }
 bitcoin = { workspace = true }
+bitcoincore-rpc = { workspace = true }
 ethers = { workspace = true }
 enum_dispatch = { workspace = true }
 hex = { workspace = true }
@@ -31,25 +32,27 @@ serde_json = { workspace = true }
 serde_with = { workspace = true }
 derive_more = { workspace = true }
 eyre = { workspace = true }
-fastcrypto = { workspace = true }
+fastcrypto = { workspace = true, features = ["copy_key"] }
 schemars = {workspace = true }
 strum = { workspace = true }
 strum_macros = { workspace = true }
 async-trait ={ workspace = true }
 nostr = { workspace = true }
 clap = { workspace = true }
+sha3 = { workspace = true }
 
 move-core-types = { workspace = true }
 move-stdlib = { workspace = true }
 move-command-line-common = { workspace = true }
 move-binary-format = { workspace = true }
+move-resource-viewer = { workspace = true }
 
 moveos-types = { workspace = true }
 moveos-stdlib = { workspace = true }
 moveos = { workspace = true }
 
-proptest = { default-features = false, optional = true, workspace = true }
-proptest-derive = { default-features = false, optional = true, workspace = true }
+proptest = { optional = true, workspace = true }
+proptest-derive = { optional = true, workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

@@ -11,16 +11,18 @@ pub mod moveos_stdlib;
 
 #[derive(Debug, Clone)]
 pub struct GasParameters {
-    move_stdlib: move_stdlib::natives::GasParameters,
-    move_nursery: move_stdlib::natives::NurseryGasParameters,
-    table_extension: raw_table::GasParameters,
-    type_info: moveos_stdlib::type_info::GasParameters,
-    rlp: moveos_stdlib::rlp::GasParameters,
-    bcd: moveos_stdlib::bcs::GasParameters,
-    events: moveos_stdlib::event::GasParameters,
-    test_helper: moveos_stdlib::test_helper::GasParameters,
-    signer: moveos_stdlib::signer::GasParameters,
-    move_module: moveos_stdlib::move_module::GasParameters,
+    pub move_stdlib: move_stdlib::natives::GasParameters,
+    pub move_nursery: move_stdlib::natives::NurseryGasParameters,
+    pub table_extension: raw_table::GasParameters,
+    pub type_info: moveos_stdlib::type_info::GasParameters,
+    pub rlp: moveos_stdlib::rlp::GasParameters,
+    pub bcd: moveos_stdlib::bcs::GasParameters,
+    pub events: moveos_stdlib::event::GasParameters,
+    pub test_helper: moveos_stdlib::test_helper::GasParameters,
+    pub signer: moveos_stdlib::signer::GasParameters,
+    pub move_module: moveos_stdlib::move_module::GasParameters,
+    pub object: moveos_stdlib::object::GasParameters,
+    pub json: moveos_stdlib::json::GasParameters,
 }
 
 impl GasParameters {
@@ -36,6 +38,8 @@ impl GasParameters {
             test_helper: moveos_stdlib::test_helper::GasParameters::zeros(),
             signer: moveos_stdlib::signer::GasParameters::zeros(),
             move_module: moveos_stdlib::move_module::GasParameters::zeros(),
+            object: moveos_stdlib::object::GasParameters::zeros(),
+            json: moveos_stdlib::json::GasParameters::zeros(),
         }
     }
 }
@@ -90,6 +94,8 @@ pub fn all_natives(gas_params: GasParameters) -> NativeFunctionTable {
         "move_module",
         moveos_stdlib::move_module::make_all(gas_params.move_module)
     );
+    add_natives!("object", moveos_stdlib::object::make_all(gas_params.object));
+    add_natives!("json", moveos_stdlib::json::make_all(gas_params.json));
 
     let moveos_native_fun_table = make_table_from_iter(MOVEOS_STD_ADDRESS, natives);
     native_fun_table.extend(moveos_native_fun_table);

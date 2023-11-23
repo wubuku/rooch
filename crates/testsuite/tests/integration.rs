@@ -5,13 +5,12 @@ use anyhow::{bail, Result};
 use clap::Parser;
 use cucumber::{given, then, World as _};
 use jpst::TemplateContext;
-use move_core_types::account_address::AccountAddress;
 use rooch::RoochCli;
-use rooch_config::rooch_config_dir;
+use rooch_config::{rooch_config_dir, RoochOpt, ServerOpt};
 use rooch_rpc_client::wallet_context::WalletContext;
 use rooch_rpc_server::Service;
 use serde_json::Value;
-use tracing::info;
+use tracing::{debug, info};
 
 #[derive(cucumber::World, Debug, Default)]
 struct World {
@@ -22,7 +21,9 @@ struct World {
 #[given(expr = "a server for {word}")] // Cucumber Expression
 async fn start_server(w: &mut World, _scenario: String) {
     let mut service = Service::new();
-    service.start(true).await.unwrap();
+    let opt = RoochOpt::new_with_temp_store();
+    let server_opt = ServerOpt::new();
+    service.start(&opt, server_opt).await.unwrap();
 
     w.service = Some(service);
 }
@@ -49,22 +50,21 @@ async fn run_cmd(world: &mut World, args: String) {
         .parent()
         .unwrap()
         .join("rooch_test");
-
-    let default = if config_dir.exists() {
-        let context = WalletContext::new(Some(config_dir.clone())).await.unwrap();
-
-        match context.config.active_address {
-            Some(addr) => AccountAddress::from(addr).to_hex_literal(),
-            None => "".to_owned(),
-        }
-    } else {
-        "".to_owned()
-    };
-
-    let args = args.replace("{default}", &default);
-
+    debug!("config_dir: {:?}", config_dir);
     if world.tpl_ctx.is_none() {
-        world.tpl_ctx = Some(TemplateContext::new());
+        let mut tpl_ctx = TemplateContext::new();
+        if config_dir.exists() {
+            let context = WalletContext::new(Some(config_dir.clone())).unwrap();
+            let address_mapping = serde_json::Value::Object(
+                context
+                    .address_mapping
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), Value::String(v.to_hex_literal())))
+                    .collect(),
+            );
+            tpl_ctx.entry("address_mapping").set(address_mapping);
+        }
+        world.tpl_ctx = Some(tpl_ctx);
     }
     let tpl_ctx = world.tpl_ctx.as_mut().unwrap();
     let args = eval_command_args(tpl_ctx, args);
@@ -75,49 +75,71 @@ async fn run_cmd(world: &mut World, args: String) {
     args.push("--config-dir".to_owned());
     args.push(config_dir.to_str().unwrap().to_string());
     let opts: RoochCli = RoochCli::parse_from(args);
-    let output = rooch::run_cli(opts)
-        .await
-        .expect("CLI should run successfully.");
+    let ret = rooch::run_cli(opts).await;
+    debug!("run_cli result: {:?}", ret);
+    match ret {
+        Ok(output) => {
+            let result_json = serde_json::from_str::<Value>(&output);
 
-    let result_json = serde_json::from_str::<Value>(&output);
-
-    if result_json.is_ok() {
-        tpl_ctx
-            .entry(cmd_name)
-            .append::<Value>(result_json.unwrap());
+            if result_json.is_ok() {
+                tpl_ctx
+                    .entry(cmd_name)
+                    .append::<Value>(result_json.unwrap());
+            }
+        }
+        Err(err) => {
+            let err_msg = Value::String(err.to_string());
+            tpl_ctx.entry(cmd_name).append::<Value>(err_msg);
+        }
     }
+    debug!("current tpl_ctx: {:?}", tpl_ctx);
 }
 
 #[then(regex = r#"assert: "([^"]*)""#)]
-async fn assert_output(world: &mut World, args: String) {
+async fn assert_output(world: &mut World, orginal_args: String) {
     assert!(world.tpl_ctx.is_some(), "tpl_ctx is none");
-    let args = eval_command_args(world.tpl_ctx.as_ref().unwrap(), args);
-    let parameters = args.split_whitespace().collect::<Vec<_>>();
-
-    for chunk in parameters.chunks(3) {
+    assert!(orginal_args.len() > 0, "assert args is empty");
+    let args = eval_command_args(world.tpl_ctx.as_ref().unwrap(), orginal_args.clone());
+    let splited_args = split_string_with_quotes(&args).expect("Invalid commands");
+    debug!(
+        "originl args: {}\n after eval: {}\n after split: {:?}",
+        orginal_args, args, splited_args
+    );
+    assert!(
+        !splited_args.is_empty(),
+        "splited_args should not empty, the orginal_args:{}",
+        orginal_args
+    );
+    for chunk in splited_args.chunks(3) {
         let first = chunk.get(0).cloned();
         let op = chunk.get(1).cloned();
         let second = chunk.get(2).cloned();
 
-        info!("assert value: {:?} {:?} {:?}", first, op, second);
+        debug!("assert value: {:?} {:?} {:?}", first, op, second);
 
         match (first, op, second) {
-            (Some(first), Some(op), Some(second)) => match op {
-                "==" => assert_eq!(first, second),
-                "!=" => assert_ne!(first, second),
-                _ => panic!("unsupported operator"),
+            (Some(first), Some(op), Some(second)) => match op.as_str() {
+                "==" => assert_eq!(first, second, "Assert {:?} == {:?} failed", first, second),
+                "!=" => assert_ne!(first, second, "Assert {:?} 1= {:?} failed", first, second),
+                "contains" => assert!(
+                    first.contains(&second),
+                    "Assert {:?} contains {:?} failed",
+                    first,
+                    second
+                ),
+                _ => panic!("unsupported operator {:?}", op.as_str()),
             },
-            _ => panic!("expected 3 arguments: first [==|!=] second"),
+            _ => panic!(
+                "expected 3 arguments: first [==|!=] second, but got input {:?}",
+                args
+            ),
         }
     }
     info!("assert ok!");
 }
 
 fn eval_command_args(ctx: &TemplateContext, args: String) -> String {
-    // info!("args: {}", args);
-    let args = args.replace("\\\"", "\"");
     let eval_args = jpst::format_str!(&args, ctx);
-    // info!("eval args:{}", eval_args);
     eval_args
 }
 
@@ -128,14 +150,37 @@ fn split_string_with_quotes(s: &str) -> Result<Vec<String>> {
     let mut chars = s.chars().peekable();
     let mut current = String::new();
     let mut in_quotes = false;
+    let mut in_escape = false;
+    let mut in_single_quotes = false;
 
     while let Some(c) = chars.next() {
         match c {
-            '"' => {
-                in_quotes = !in_quotes;
-                // Skip the quote
+            '\\' => {
+                in_escape = true;
             }
-            ' ' if !in_quotes => {
+            '"' => {
+                if in_escape {
+                    current.push(c);
+                    in_escape = false;
+                } else if in_single_quotes {
+                    current.push(c);
+                } else {
+                    // Skip the quote
+                    in_quotes = !in_quotes;
+                }
+            }
+            '\'' => {
+                if in_escape {
+                    current.push(c);
+                    in_escape = false;
+                } else if in_quotes {
+                    current.push(c);
+                } else {
+                    // Skip the quote
+                    in_single_quotes = !in_single_quotes;
+                }
+            }
+            ' ' if !in_quotes && !in_single_quotes => {
                 if !current.is_empty() {
                     result.push(current.clone());
                     current.clear();
